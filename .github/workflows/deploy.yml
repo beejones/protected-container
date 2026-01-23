@@ -58,10 +58,15 @@ jobs:
         echo "${{ secrets.RUNTIME_ENV_DOTENV }}" > .env
         chmod 600 .env
 
+    - name: Build and Push Docker Image
+      env:
+        IMAGE: ghcr.io/${{ github.repository }}:latest
+      run: |
+        docker build -t $IMAGE ./docker
+        docker push $IMAGE
+
     - name: Deploy to Azure
       env:
-        GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GHCR_USERNAME: ${{ vars.GHCR_USERNAME || github.actor }}
         # Map repository vars/secrets to env vars the script expects
         AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
         AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
@@ -71,18 +76,22 @@ jobs:
         AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'protected-azure-container-rg' }}
         AZURE_LOCATION: ${{ inputs.location }}
         AZURE_CONTAINER_NAME: ${{ vars.AZURE_CONTAINER_NAME || 'protected-azure-container' }}
-        GHCR_IMAGE: ghcr.io/${{ github.repository }}:latest
+        CONTAINER_IMAGE: ghcr.io/${{ github.repository }}:latest
         # Use vars set by gh_sync_actions_env.py (PUBLIC_DOMAIN, ACME_EMAIL)
-        # Also accept AZURE_ prefixed versions if set
         PUBLIC_DOMAIN: ${{ vars.PUBLIC_DOMAIN || vars.AZURE_PUBLIC_DOMAIN }}
         ACME_EMAIL: ${{ vars.ACME_EMAIL || vars.AZURE_ACME_EMAIL }}
         BASIC_AUTH_USER: ${{ vars.BASIC_AUTH_USER }}
         BASIC_AUTH_HASH: ${{ secrets.BASIC_AUTH_HASH }}
+        # Registry credentials for ACI to pull the private image
+        GHCR_PRIVATE: "true"
+        GHCR_USERNAME: ${{ github.actor }}
+        GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         # Use --no-interactive to ensure no prompts
-        # Use --no-set-vars-secrets because we are already running In Actions
+        # Use --no-set-vars-secrets because we are already running in Actions
+        # Use --no-publish because we already built and pushed above
         python3 scripts/azure_deploy_container.py \
           --no-interactive \
           --no-set-vars-secrets \
-          --build-push \
+          --no-publish \
           --upload-env
