@@ -86,6 +86,7 @@ DEPLOY_ENV_MATERIALIZE_KEYS = [
     "ACME_EMAIL",
     # Image / registry
     "GHCR_IMAGE",
+    "CONTAINER_IMAGE",
     "IMAGE",
     "GHCR_PRIVATE",
     "GHCR_USERNAME",
@@ -1202,25 +1203,34 @@ def main() -> None:
     persist_to_kv = bool(args.persist_to_keyvault)
 
     # Load deploy-time values.
-    # Prefer env.deploy/.env.deploy so deploy-only secrets never end up in Key Vault.
+    # We load .env (runtime config) first, then .env.deploy (deploy-time overrides) on top.
+    
+    # 1. Load .env (if exists)
+    runtime_env_path = repo_root / ".env"
+    if runtime_env_path.exists():
+        load_dotenv(dotenv_path=str(runtime_env_path), override=False)
+
+    # 2. Load .env.deploy (or custom file)
     deploy_env_path: Path | None = None
     if args.env_file:
         deploy_env_path = Path(args.env_file).expanduser().resolve()
     else:
-        for candidate in (repo_root / ".env.deploy", repo_root / "env.deploy", repo_root / ".env"):
+        for candidate in (repo_root / ".env.deploy", repo_root / "env.deploy"):
             if candidate.exists():
                 deploy_env_path = candidate
                 break
 
-    # If no deploy env file exists (common in CI), create one from the environment so
-    # deploy-time config is inspectable and downstream tools can read it.
+    # If no deploy env file exists, but we are defaulting, use .env.deploy path for materialization
     if deploy_env_path is None:
         deploy_env_path = repo_root / ".env.deploy"
-        materialize_deploy_env_file_if_missing(path=deploy_env_path)
-
+        
     # load_dotenv() is a no-op if the file doesn't exist.
-    if deploy_env_path is not None:
-        load_dotenv(dotenv_path=str(deploy_env_path), override=False)
+    # override=True ensures deploy-time vars take precedence over runtime vars.
+    if deploy_env_path is not None and deploy_env_path.exists():
+        load_dotenv(dotenv_path=str(deploy_env_path), override=True)
+    elif not runtime_env_path.exists():
+        # If neither exists, materialize .env.deploy if we have env vars (CI case)
+        materialize_deploy_env_file_if_missing(path=deploy_env_path)
 
     if not az_logged_in():
         raise SystemExit("Not logged into Azure. Run: az login")
@@ -1252,8 +1262,17 @@ def main() -> None:
     storage_name = (args.storage_name or f"{rg}stg").replace("-", "")
     storage_name = "".join([c for c in storage_name.lower() if c.isalnum()])[:24]
 
+    # Sanitize Key Vault name: <24 chars, alphanumeric/hyphens, no start/end hyphen.
+    # Default: derived from RG name.
+    # We strip hyphens to save space and reduce risk of consecutive hyphens.
     identity_name = args.identity_name or f"{rg}-identity"
-    kv_name = args.keyvault_name or f"{rg}-kv"
+
+    if args.keyvault_name:
+        kv_name = args.keyvault_name
+    else:
+        # e.g. "protected-azure-container-rg" -> "protectedazurecontainkv"
+        base = "".join([c for c in rg.lower() if c.isalnum()])
+        kv_name = f"{base}kv"[:24]
 
     # Ensure Azure resources exist so a single azure_deploy_container invocation can bootstrap infra.
     shares_to_ensure = [
@@ -1328,7 +1347,7 @@ def main() -> None:
     image = resolve_value(
         name="image",
         arg_value=args.image,
-        env_names=["IMAGE", "GHCR_IMAGE"],
+        env_names=["CONTAINER_IMAGE", "IMAGE", "GHCR_IMAGE"],
         kv_name=kv_name_for_secrets,
         kv_secret_name=args.image_secret,
         interactive=interactive,
@@ -1462,7 +1481,8 @@ def main() -> None:
     # If the image is private and the user didn't specify any build/push flags,
     # default to publishing the image so a single command works end-to-end.
     if not (args.build or args.push or args.build_push):
-        publish_default = ghcr_private
+        # Default to build-push unless explicitly disabled via --no-publish
+        publish_default = True
         publish = publish_default if args.publish is None else bool(args.publish)
         if publish:
             build_requested = True
@@ -1494,7 +1514,7 @@ def main() -> None:
         # When pulling from a private GHCR image, infer the registry server from the image
         # so the user does not get prompted for it.
         registry_server_arg = args.registry_server
-        if registry_server_arg is None and not registry_server_seed and ghcr_private and inferred_registry:
+        if registry_server_arg is None and not registry_server_seed and (ghcr_private or push_requested) and inferred_registry:
             registry_server_arg = inferred_registry
 
         registry_server = resolve_value(
@@ -1510,6 +1530,15 @@ def main() -> None:
             persist_to_kv=persist_to_kv,
         )
 
+        # Infer username for GHCR if not provided
+        registry_username_default = None
+        if not args.registry_username and not registry_username_seed and image.startswith("ghcr.io/"):
+            try:
+                # ghcr.io/owner/repo
+                registry_username_default = image.split("/")[1]
+            except IndexError:
+                pass
+
         registry_username = resolve_value(
             name="registry_username",
             arg_value=args.registry_username,
@@ -1520,6 +1549,7 @@ def main() -> None:
             secret=False,
             prompt_label="Registry username",
             persist_to_kv=persist_to_kv,
+            default=registry_username_default,
         )
 
         registry_password = resolve_value(
@@ -1564,6 +1594,14 @@ def main() -> None:
         # Docker operations happen from the repo root by default.
         docker_context = (args.docker_context or str(repo_root)).strip() or str(repo_root)
         dockerfile = (args.dockerfile or "").strip() or None
+
+        if not dockerfile and not args.docker_context:
+            if (repo_root / "docker" / "Dockerfile").exists():
+                # If docker/Dockerfile exists and no context given,
+                # assume the user wants to build the inner "docker" directory as a context.
+                docker_context = str(repo_root / "docker")
+                # Leave dockerfile=None so it defaults to "Dockerfile" inside that context.
+                dockerfile = None
 
         if build_requested:
             print(f"[docker] building image: {image}")
