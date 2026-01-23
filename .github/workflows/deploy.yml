@@ -72,6 +72,8 @@ jobs:
         docker push $CADDY_MIRROR
 
     - name: Deploy to Azure
+      id: deploy
+      continue-on-error: true
       env:
         # Map repository vars/secrets to env vars the script expects
         AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
@@ -91,8 +93,9 @@ jobs:
         # Registry credentials for ACI to pull the private image
         GHCR_PRIVATE: "true"
         GHCR_USERNAME: ${{ github.actor }}
-        GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
       run: |
+        set -euo pipefail
         # Use --no-interactive to ensure no prompts
         # Use --no-set-vars-secrets because we are already running in Actions
         # Use --no-publish because we already built and pushed above
@@ -101,4 +104,40 @@ jobs:
           --no-set-vars-secrets \
           --no-publish \
           --upload-env \
-          --caddy-image ghcr.io/${{ github.repository }}/caddy:2-alpine
+          --caddy-image ghcr.io/${{ github.repository }}/caddy:2-alpine \
+          2>&1 | tee deploy.log
+
+    - name: Dump generated ACI YAML (sanitized)
+      if: steps.deploy.outcome == 'failure'
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "::group::Deploy log (last 200 lines)"
+        tail -n 200 deploy.log || true
+        echo "::endgroup::"
+
+        # Extract the YAML path printed by the script, e.g.: "[deploy] wrote: /tmp/tmpXXXX.yaml"
+        yaml_path=""
+        yaml_path=$(grep -Eo '\[deploy\] wrote: /tmp/[^ ]+\.yaml' deploy.log | tail -n 1 | awk '{print $3}') || true
+
+        if [ -z "$yaml_path" ]; then
+          echo "::warning::Could not find generated YAML path in deploy.log"
+          exit 0
+        fi
+
+        if [ ! -f "$yaml_path" ]; then
+          echo "::warning::YAML path not found on runner: $yaml_path"
+          exit 0
+        fi
+
+        echo "::group::ACI YAML (sanitized): $yaml_path"
+        # Mask obvious secrets in the YAML before printing.
+        sed -E \
+          -e "s/^([[:space:]]*password:).*/\1 '***'/" \
+          -e "s/^([[:space:]]*secureValue:).*/\1 '***'/" \
+          "$yaml_path"
+        echo "::endgroup::"
+
+    - name: Fail workflow if deploy failed
+      if: steps.deploy.outcome == 'failure'
+      run: exit 1

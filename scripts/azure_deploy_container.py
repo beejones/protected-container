@@ -559,6 +559,35 @@ def parse_image_ref(image: str) -> tuple[str | None, str]:
     return None, image
 
 
+def ghcr_repo_prefix_for_image(*, image: str, registry_server: str) -> str | None:
+    """Return ghcr.io/<owner>/<repo> derived from an image reference.
+
+    Examples:
+    - ghcr.io/owner/repo:tag -> ghcr.io/owner/repo
+    - ghcr.io/owner/repo/path:tag -> ghcr.io/owner/repo
+    """
+    registry_server = (registry_server or "").strip()
+    reg, rest = parse_image_ref(image)
+    if not registry_server or not reg or reg != registry_server:
+        return None
+
+    parts = (rest or "").split("/")
+    if len(parts) < 2:
+        return None
+    owner = parts[0].strip()
+    repo = parts[1].strip()
+    if not owner or not repo:
+        return None
+
+    # Strip tag/digest from the repo segment.
+    repo = repo.split("@", 1)[0]
+    repo = repo.split(":", 1)[0]
+    if not repo:
+        return None
+
+    return f"{registry_server}/{owner}/{repo}"
+
+
 def docker_login(*, registry: str, username: str, token: str) -> None:
     registry = (registry or "").strip()
     username = (username or "").strip()
@@ -1678,21 +1707,34 @@ def main() -> None:
             # multi-registry conflicts (ACI "RegistryErrorResponse" from Docker Hub).
             # We assume if the user is pushing/using 'ghcr.io', we can also push caddy there.
             if registry_server and "ghcr.io" in registry_server and registry_username:
-                # Target: ghcr.io/<owner>/caddy:2-alpine
-                # We need the owner from the registry_username or implied from the main image
-                caddy_mirror_tag = f"{registry_server}/{registry_username}/caddy:2-alpine"
-                
-                print(f"[docker] Mirroring caddy to GHCR: {caddy_mirror_tag}")
-                try:
-                    # Retag
-                    subprocess.run(["docker", "tag", caddy_image, caddy_mirror_tag], check=True, capture_output=True)
-                    # Push
-                    docker_push(image=caddy_mirror_tag)
-                    # Use the mirrored image in the YAML
-                    caddy_image = caddy_mirror_tag
-                    print(f"[docker] Successfully mirrored caddy. Using: {caddy_image}")
-                except Exception as e:
-                    print(f"[warn] Failed to mirror caddy to GHCR ({e}); falling back to {caddy_image}", file=sys.stderr)
+                # Prefer keeping Caddy in the same ghcr.io/<owner>/<repo>/... namespace as the
+                # main image. This avoids pushing to ghcr.io/<owner>/caddy, which often fails in
+                # GitHub Actions due to package scoping/permissions.
+                repo_prefix = ghcr_repo_prefix_for_image(image=image, registry_server=registry_server)
+                if not repo_prefix:
+                    repo_prefix = f"{registry_server}/{registry_username}"
+
+                caddy_mirror_tag = f"{repo_prefix}/caddy:2-alpine"
+
+                if caddy_image == caddy_mirror_tag:
+                    print(f"[docker] Caddy image already in GHCR namespace: {caddy_image}")
+                else:
+                    print(f"[docker] Mirroring caddy to GHCR: {caddy_mirror_tag}")
+                    try:
+                        # Retag
+                        subprocess.run(["docker", "tag", caddy_image, caddy_mirror_tag], check=True, capture_output=True)
+                        # Push
+                        docker_push(image=caddy_mirror_tag)
+                        # Use the mirrored image in the YAML
+                        caddy_image = caddy_mirror_tag
+                        print(f"[docker] Successfully mirrored caddy. Using: {caddy_image}")
+                    except subprocess.CalledProcessError as e:
+                        hint = _hint_for_ghcr_scope_error(getattr(e, "stderr", None))
+                        if hint:
+                            print(hint, file=sys.stderr)
+                        print(f"[warn] Failed to mirror caddy to GHCR ({e}); falling back to {caddy_image}", file=sys.stderr)
+                    except Exception as e:
+                        print(f"[warn] Failed to mirror caddy to GHCR ({e}); falling back to {caddy_image}", file=sys.stderr)
 
         except Exception as e:
             print(f"[warn] Could not prefetch caddy image locally ({e}); continuing.", file=sys.stderr)
