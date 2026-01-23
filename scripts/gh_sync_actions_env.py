@@ -446,6 +446,20 @@ def main() -> None:
     # 1) Always store runtime dotenv as a secret.
     _set_secret(repo=repo, name="RUNTIME_ENV_DOTENV", value=runtime_text, dry_run=dry_run)
 
+    # 1b) Also sync specific runtime keys needed by the workflow directly.
+    # Parse the runtime env to extract individual values.
+    runtime_kv = dotenv_values(stream=io.StringIO(runtime_text))
+    
+    # BASIC_AUTH_USER -> variable
+    basic_auth_user = str(runtime_kv.get("BASIC_AUTH_USER") or "").strip()
+    if basic_auth_user:
+        _set_variable(repo=repo, name="BASIC_AUTH_USER", value=basic_auth_user, dry_run=dry_run)
+    
+    # BASIC_AUTH_HASH -> secret (contains bcrypt hash)
+    basic_auth_hash = str(runtime_kv.get("BASIC_AUTH_HASH") or "").strip()
+    if basic_auth_hash:
+        _set_secret(repo=repo, name="BASIC_AUTH_HASH", value=basic_auth_hash, dry_run=dry_run)
+
     if args.only_files:
         return
 

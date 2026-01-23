@@ -71,8 +71,10 @@ jobs:
         AZURE_LOCATION: ${{ inputs.location }}
         AZURE_CONTAINER_NAME: ${{ vars.AZURE_CONTAINER_NAME || 'protected-azure-container' }}
         GHCR_IMAGE: ghcr.io/${{ github.repository }}:latest
-        AZURE_PUBLIC_DOMAIN: ${{ vars.AZURE_PUBLIC_DOMAIN }}
-        AZURE_ACME_EMAIL: ${{ vars.AZURE_ACME_EMAIL }}
+        # Use vars set by gh_sync_actions_env.py (PUBLIC_DOMAIN, ACME_EMAIL)
+        # Also accept AZURE_ prefixed versions if set
+        PUBLIC_DOMAIN: ${{ vars.PUBLIC_DOMAIN || vars.AZURE_PUBLIC_DOMAIN }}
+        ACME_EMAIL: ${{ vars.ACME_EMAIL || vars.AZURE_ACME_EMAIL }}
         BASIC_AUTH_USER: ${{ vars.BASIC_AUTH_USER }}
         BASIC_AUTH_HASH: ${{ secrets.BASIC_AUTH_HASH }}
       run: |
