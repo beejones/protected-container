@@ -1717,8 +1717,11 @@ def main() -> None:
             break  # Success
         except subprocess.CalledProcessError as e:
             err = getattr(e, "stderr", "") or ""
-            # Check if it's a transient registry conflict error
-            is_transient = "Conflict" in err and "RegistryErrorResponse" in err
+            # Check if it's a transient registry conflict error or generic registry error
+            # Examples:
+            # - 'Conflict':'RegistryErrorResponse'
+            # - (RegistryErrorResponse) An error response is received from the docker registry
+            is_transient = "RegistryErrorResponse" in err or "Conflict" in err
             if is_transient and attempt < max_retries:
                 sleep_time = min(60.0, base_delay * (2 ** (attempt - 1)))
                 print(f"[deploy] Registry conflict error (attempt {attempt}/{max_retries}). Retrying in {sleep_time:.0f}s...")
