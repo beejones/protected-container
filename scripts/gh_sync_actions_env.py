@@ -316,10 +316,10 @@ def main() -> None:
     )
     ap.add_argument(
         "--azure-app-display-name",
-        default=None,
+        default="github-actions-aci-deploy",
         help=(
             "Optional: if AZURE_CLIENT_ID is missing, look it up by Azure AD App Registration display name "
-            "using `az ad app list --display-name` (requires directory permissions)."
+            "using `az ad app list --display-name` (default: github-actions-aci-deploy)."
         ),
     )
     ap.add_argument(
@@ -429,6 +429,9 @@ def main() -> None:
             else:
                 default_branch = _detect_default_branch(repo) or "main"
                 subjects.add(f"repo:{repo}:ref:refs/heads/{default_branch}")
+                # Also authorize the 'production' environment for GitHub Actions deployment jobs
+                subjects.add(f"repo:{repo}:environment:production")
+                
                 current_branch = _detect_current_branch()
                 if current_branch and current_branch != default_branch:
                     subjects.add(f"repo:{repo}:ref:refs/heads/{current_branch}")
@@ -442,6 +445,20 @@ def main() -> None:
 
     # 1) Always store runtime dotenv as a secret.
     _set_secret(repo=repo, name="RUNTIME_ENV_DOTENV", value=runtime_text, dry_run=dry_run)
+
+    # 1b) Also sync specific runtime keys needed by the workflow directly.
+    # Parse the runtime env to extract individual values.
+    runtime_kv = dotenv_values(stream=io.StringIO(runtime_text))
+    
+    # BASIC_AUTH_USER -> variable
+    basic_auth_user = str(runtime_kv.get("BASIC_AUTH_USER") or "").strip()
+    if basic_auth_user:
+        _set_variable(repo=repo, name="BASIC_AUTH_USER", value=basic_auth_user, dry_run=dry_run)
+    
+    # BASIC_AUTH_HASH -> secret (contains bcrypt hash)
+    basic_auth_hash = str(runtime_kv.get("BASIC_AUTH_HASH") or "").strip()
+    if basic_auth_hash:
+        _set_secret(repo=repo, name="BASIC_AUTH_HASH", value=basic_auth_hash, dry_run=dry_run)
 
     if args.only_files:
         return

@@ -24,8 +24,8 @@ def kv_secret_set_quiet(*, vault_name: str, secret_name: str, value: str) -> Non
 
     print(f"[kv] setting secret '{secret_name}' in vault '{vault_name}'")
     
-    # Retry loop for RBAC propagation (max ~3 mins with exp backoff)
-    max_retries = 12
+    # Retry loop for RBAC propagation (max ~5 mins with exp backoff)
+    max_retries = 20
     base_delay = 3.0
     
     for attempt in range(1, max_retries + 1):
@@ -65,9 +65,16 @@ def kv_secret_set_quiet(*, vault_name: str, secret_name: str, value: str) -> Non
                 continue
         
         # If it's not an auth error, or we ran out of retries, raise.
+        # Ensure we print stderr so it shows up in CI logs before raising
+        print(f"[kv] Error setting secret (exit code {result.returncode}).", file=sys.stderr)
+        print(f"[kv] STDOUT: {result.stdout.strip() if result.stdout else '<empty>'}", file=sys.stderr)
+        print(f"[kv] STDERR: {result.stderr.strip() if result.stderr else '<empty>'}", file=sys.stderr)
+        print(f"[kv] Secret value length: {len(value)} characters", file=sys.stderr)
+        sys.stderr.flush()
+            
         raise subprocess.CalledProcessError(
             result.returncode,
-            result.args,  # type: ignore[arg-type]
+            result.args,  
             output=result.stdout,
             stderr=result.stderr,
         )
@@ -159,6 +166,7 @@ def run_az_command(args: list[str], *, capture_output: bool = True, ignore_error
             print(result.stdout.rstrip(), file=sys.stderr)
         if result.stderr:
             print(result.stderr.rstrip(), file=sys.stderr)
+        sys.stderr.flush()
 
         raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
 
