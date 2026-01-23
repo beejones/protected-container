@@ -61,6 +61,7 @@ jobs:
     - name: Deploy to Azure
       env:
         GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GHCR_USERNAME: ${{ vars.GHCR_USERNAME || github.actor }}
         # Map repository vars/secrets to env vars the script expects
         AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
         AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
