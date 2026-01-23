@@ -1673,6 +1673,27 @@ def main() -> None:
         try:
             print(f"[docker] prefetching caddy image: {caddy_image}")
             docker_pull(image=caddy_image)
+
+            # If we are using GHCR for the main image, mirror Caddy to GHCR as well to avoid
+            # multi-registry conflicts (ACI "RegistryErrorResponse" from Docker Hub).
+            # We assume if the user is pushing/using 'ghcr.io', we can also push caddy there.
+            if registry_server and "ghcr.io" in registry_server and registry_username:
+                # Target: ghcr.io/<owner>/caddy:2-alpine
+                # We need the owner from the registry_username or implied from the main image
+                caddy_mirror_tag = f"{registry_server}/{registry_username}/caddy:2-alpine"
+                
+                print(f"[docker] Mirroring caddy to GHCR: {caddy_mirror_tag}")
+                try:
+                    # Retag
+                    subprocess.run(["docker", "tag", caddy_image, caddy_mirror_tag], check=True, capture_output=True)
+                    # Push
+                    docker_push(image=caddy_mirror_tag)
+                    # Use the mirrored image in the YAML
+                    caddy_image = caddy_mirror_tag
+                    print(f"[docker] Successfully mirrored caddy. Using: {caddy_image}")
+                except Exception as e:
+                    print(f"[warn] Failed to mirror caddy to GHCR ({e}); falling back to {caddy_image}", file=sys.stderr)
+
         except Exception as e:
             print(f"[warn] Could not prefetch caddy image locally ({e}); continuing.", file=sys.stderr)
 
