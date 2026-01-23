@@ -39,6 +39,32 @@ If you use `python3 scripts/gh_sync_actions_env.py --set`, it will sync these fr
 
 Note: `python3 scripts/azure_deploy_container.py` (run locally) syncs GitHub Actions vars/secrets by default; use `--no-set-vars-secrets` to disable (CI does this).
 
+## GitHub Actions: Package Permissions
+
+When pushing from GitHub Actions using `GITHUB_TOKEN`, you may see:
+```
+denied: permission_denied: write_package
+```
+
+**Fix 1: Link Package to Repository**
+
+If the package already exists:
+1. Go to **your GitHub profile** → **Packages** → find your package
+2. Click **Package settings** (gear icon)
+3. Under **"Manage Actions access"**, click **Add Repository**
+4. Add your repository with **Write** access
+
+**Fix 2: First-time push (new package)**
+
+For a brand new package, the first push must come from a user with a PAT (not `GITHUB_TOKEN`). After the first push, link the package to the repo as above.
+
+**Fix 3: Use a Personal Access Token in CI**
+
+If the above doesn't work:
+1. Create a classic PAT with `write:packages` scope
+2. Add it as a repository secret (e.g., `GHCR_PAT`)
+3. Update the workflow to use this PAT instead of `GITHUB_TOKEN`
+
 ## Quick verification
 
 ```bash
