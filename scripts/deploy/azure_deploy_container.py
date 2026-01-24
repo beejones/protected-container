@@ -34,6 +34,21 @@ sys.path.append(str(Path(__file__).parent))
 import azure_deploy_container_helpers as deploy_helpers
 import azure_deploy_yaml_helpers as yaml_helpers
 
+from env_schema import (
+    DEPLOY_SCHEMA,
+    RUNTIME_SCHEMA,
+    EnvTarget,
+    EnvValidationError,
+    SecretsEnum,
+    VarsEnum,
+    apply_defaults,
+    parse_dotenv_file,
+    validate_cross_field_rules,
+    validate_known_keys,
+    validate_required,
+    write_dotenv_values,
+)
+
 try:
     from azure_utils import kv_data_plane_available, kv_secret_set_quiet, run_az_command
 except ImportError:
@@ -181,10 +196,6 @@ def main() -> None:
         help="bcrypt cost for generated hash (default: 14)",
     )
 
-    parser.add_argument("--registry-server", default=None, help="Container registry server (e.g. ghcr.io)")
-    parser.add_argument("--registry-username", default=None, help="Registry username (for private images)")
-    parser.add_argument("--registry-password", default=None, help="Registry password/token (for private images)")
-
     parser.add_argument(
         "--build",
         action="store_true",
@@ -231,16 +242,12 @@ def main() -> None:
     parser.add_argument("--basic-auth-user-secret", default="basic-auth-user")
     parser.add_argument("--basic-auth-hash-secret", default="basic-auth-hash")
     parser.add_argument("--image-secret", default="image")
-    parser.add_argument("--registry-username-secret", default="registry-username")
-    parser.add_argument("--registry-password-secret", default="registry-password")
-    parser.add_argument("--registry-server-secret", default="registry-server")
-
     parser.add_argument(
         "--env-file",
         default=None,
         help=(
-            "Env file to load for deploy-time values. If omitted, auto-detects (in order): "
-            ".env.deploy, env.deploy, .env"
+            "Env file to load for deploy-time values (default: repo root .env.deploy). "
+            "Note: deployment always loads .env first, then this deploy env file on top (deploy-time overrides)."
         ),
     )
 
@@ -255,9 +262,26 @@ def main() -> None:
         action=argparse.BooleanOptionalAction,
         default=True,
         help=(
-            "Sync deploy-time vars/secrets to GitHub Actions (via scripts/gh_sync_actions_env.py). "
+            "Sync deploy-time vars/secrets to GitHub Actions (via scripts/deploy/gh_sync_actions_env.py). "
             "Default: enabled. Use --no-set-vars-secrets in CI."
         ),
+    )
+
+    parser.add_argument(
+        "--validate-dotenv",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Validate required keys and cross-field rules from .env/.env.deploy before deploying (default: enabled). "
+            "Use --no-validate-dotenv to allow interactive prompting for missing values."
+        ),
+    )
+
+    parser.add_argument(
+        "--write-back-deploy-env",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Write derived AZURE_* IDs back into the deploy env file (default: enabled)",
     )
 
     parser.add_argument(
@@ -294,8 +318,8 @@ def main() -> None:
         help="Pre-pull Caddy image locally to validate it exists (default: enabled)",
     )
 
-    parser.add_argument("--cpu", type=float, default=DEFAULT_CPU_CORES)
-    parser.add_argument("--memory", type=float, default=DEFAULT_MEMORY_GB)
+    parser.add_argument("--cpu", type=float, default=None, help=f"CPU cores (default: {DEFAULT_CPU_CORES})")
+    parser.add_argument("--memory", type=float, default=None, help=f"Memory GB (default: {DEFAULT_MEMORY_GB})")
 
     # Prefer a stable mirror to avoid Docker Hub rate limiting in ACI.
     # Note: ghcr.io/caddyserver/caddy does not publish a '2-alpine' tag; we use a mirror.
@@ -303,7 +327,8 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    repo_root = Path(__file__).resolve().parents[1]
+    # scripts/deploy/azure_deploy_container.py -> repo root is 2 parents up.
+    repo_root = Path(__file__).resolve().parents[2]
 
     interactive = is_interactive() if args.interactive is None else bool(args.interactive)
     # Key Vault is used at *runtime* by the container to fetch the full .env secret.
@@ -312,59 +337,92 @@ def main() -> None:
 
     # Load deploy-time values.
     # We load .env (runtime config) first, then .env.deploy (deploy-time overrides) on top.
-    
-    # 1. Load .env (if exists)
     runtime_env_path = repo_root / ".env"
-    if runtime_env_path.exists():
-        load_dotenv(dotenv_path=str(runtime_env_path), override=False)
 
-    # 2. Load .env.deploy (or custom file)
-    deploy_env_path: Path | None = None
-    if args.env_file:
-        deploy_env_path = Path(args.env_file).expanduser().resolve()
-    else:
-        for candidate in (repo_root / ".env.deploy", repo_root / "env.deploy"):
-            if candidate.exists():
-                deploy_env_path = candidate
-                break
+    deploy_env_path: Path = (
+        Path(args.env_file).expanduser().resolve() if args.env_file else (repo_root / ".env.deploy")
+    )
 
-    # If no deploy env file exists, but we are defaulting, use .env.deploy path for materialization
-    if deploy_env_path is None:
-        deploy_env_path = repo_root / ".env.deploy"
-        
+    # Strict validation of provided dotenv files (if present).
+    try:
+        if runtime_env_path.exists():
+            runtime_kv = parse_dotenv_file(runtime_env_path)
+            validate_known_keys(RUNTIME_SCHEMA, runtime_kv, context=f"runtime ({runtime_env_path.name})")
+
+        if deploy_env_path.exists():
+            deploy_kv_file = parse_dotenv_file(deploy_env_path)
+            validate_known_keys(DEPLOY_SCHEMA, deploy_kv_file, context=f"deploy ({deploy_env_path.name})")
+    except EnvValidationError as e:
+        print(e.format(), file=sys.stderr)
+        raise SystemExit(2)
+
     # load_dotenv() is a no-op if the file doesn't exist.
     # override=True ensures deploy-time vars take precedence over runtime vars.
-    if deploy_env_path is not None and deploy_env_path.exists():
+    if runtime_env_path.exists():
+        load_dotenv(dotenv_path=str(runtime_env_path), override=False)
+    if deploy_env_path.exists():
         load_dotenv(dotenv_path=str(deploy_env_path), override=True)
     elif not runtime_env_path.exists():
         # If neither exists, materialize .env.deploy if we have env vars (CI case)
         materialize_deploy_env_file_if_missing(path=deploy_env_path)
+
+    # Validate up-front so we fail fast with a full list of missing/invalid keys.
+    # This avoids later partial failures like "Missing resource group".
+    if bool(args.validate_dotenv):
+        try:
+            if runtime_env_path.exists():
+                runtime_kv = parse_dotenv_file(runtime_env_path)
+                runtime_kv = apply_defaults(RUNTIME_SCHEMA, runtime_kv)
+                validate_required(RUNTIME_SCHEMA, runtime_kv, context=f"runtime ({runtime_env_path.name})")
+
+            deploy_kv_file = parse_dotenv_file(deploy_env_path) if deploy_env_path.exists() else {}
+            deploy_schema_keys = {spec.key.value for spec in DEPLOY_SCHEMA}
+            deploy_kv_env = {k: v for k, v in os.environ.items() if k in deploy_schema_keys and str(v).strip()}
+            deploy_kv = dict(deploy_kv_file)
+            deploy_kv.update(deploy_kv_env)
+            deploy_kv = apply_defaults(DEPLOY_SCHEMA, deploy_kv)
+
+            if not deploy_kv.get(VarsEnum.AZURE_DNS_LABEL.value):
+                deploy_kv[VarsEnum.AZURE_DNS_LABEL.value] = deploy_kv.get(VarsEnum.AZURE_CONTAINER_NAME.value, "").strip()
+
+            deploy_dotenv_specs = [spec for spec in DEPLOY_SCHEMA if EnvTarget.DOTENV_DEPLOY in spec.targets]
+            validate_required(deploy_dotenv_specs, deploy_kv, context=f"deploy ({deploy_env_path.name} + env)")
+            validate_cross_field_rules(deploy_kv=deploy_kv, context=f"deploy ({deploy_env_path.name} + env)")
+        except EnvValidationError as e:
+            print(e.format(), file=sys.stderr)
+            raise SystemExit(2)
+
+    # (Non-interactive enforcement is handled by --validate-dotenv, enabled by default.)
 
     if not az_logged_in():
         raise SystemExit("Not logged into Azure. Run: az login")
 
     # Resolve Azure OIDC App (create if missing) so sync script has correct ID.
     # Prioritize: Env EnvVar -> Arg Default -> Lookup/Create
-    oidc_client_id = (os.getenv("AZURE_CLIENT_ID") or os.getenv("AZURE_APP_ID") or "").strip()
+    oidc_client_id = (os.getenv(VarsEnum.AZURE_CLIENT_ID.value) or "").strip()
     if not oidc_client_id and bool(args.set_vars_secrets):
         oidc_app_name = (args.azure_oidc_app_name or DEFAULT_OIDC_APP_NAME).strip()
         oidc_client_id = ensure_oidc_app_and_sp(display_name=oidc_app_name)
         # Set in env so downstream logic can use it
-        os.environ["AZURE_CLIENT_ID"] = oidc_client_id
+        os.environ[VarsEnum.AZURE_CLIENT_ID.value] = oidc_client_id
 
     # Keep GitHub Actions vars/secrets in sync by default (so CI has what it needs).
     # In CI, pass --no-set-vars-secrets.
     if bool(args.set_vars_secrets):
         sync_github_actions_vars_secrets(repo_root=repo_root, deploy_env_path=deploy_env_path, azure_client_id=oidc_client_id)
 
-    rg = (args.resource_group or os.getenv("AZURE_RESOURCE_GROUP") or os.getenv("RESOURCE_GROUP") or "").strip()
+    rg = (args.resource_group or os.getenv(VarsEnum.AZURE_RESOURCE_GROUP.value) or "").strip()
     if not rg:
         raise SystemExit(
-            "Missing resource group. Provide --resource-group, or set AZURE_RESOURCE_GROUP in env.deploy/.env.deploy (or pass --env-file)."
+            "Missing resource group. Provide --resource-group, or set AZURE_RESOURCE_GROUP in .env.deploy (or pass --env-file)."
         )
 
-    location = (args.location or os.getenv("AZURE_LOCATION") or os.getenv("LOCATION") or "westeurope").strip() or "westeurope"
-    name = (args.container_name or os.getenv("AZURE_CONTAINER_NAME") or os.getenv("ACI_CONTAINER_NAME") or "protected-azure-container").strip() or "protected-azure-container"
+    location = (args.location or os.getenv(VarsEnum.AZURE_LOCATION.value) or "westeurope").strip() or "westeurope"
+    name = (
+        args.container_name
+        or os.getenv(VarsEnum.AZURE_CONTAINER_NAME.value)
+        or "protected-azure-container"
+    ).strip() or "protected-azure-container"
     dns_label = (args.dns_label or name).strip().lower()
 
     storage_name = (args.storage_name or f"{rg}stg").replace("-", "")
@@ -398,11 +456,34 @@ def main() -> None:
         shares=shares_to_ensure,
     )
 
-    subscription_id = (os.getenv("AZURE_SUBSCRIPTION_ID") or "").strip()
+    subscription_id = (os.getenv(VarsEnum.AZURE_SUBSCRIPTION_ID.value) or "").strip()
     if not subscription_id:
         subscription_id = str(
             run_az_command(["account", "show", "--query", "id", "-o", "tsv"], capture_output=True)
         ).strip()
+
+    tenant_id = (os.getenv(VarsEnum.AZURE_TENANT_ID.value) or "").strip()
+    if not tenant_id:
+        tenant_id = str(
+            run_az_command(["account", "show", "--query", "tenantId", "-o", "tsv"], capture_output=True)
+        ).strip()
+
+    if subscription_id:
+        os.environ[VarsEnum.AZURE_SUBSCRIPTION_ID.value] = subscription_id
+    if tenant_id:
+        os.environ[VarsEnum.AZURE_TENANT_ID.value] = tenant_id
+
+    if bool(args.write_back_deploy_env):
+        updates: dict[str, str] = {}
+        if oidc_client_id:
+            updates[VarsEnum.AZURE_CLIENT_ID.value] = oidc_client_id
+        if tenant_id:
+            updates[VarsEnum.AZURE_TENANT_ID.value] = tenant_id
+        if subscription_id:
+            updates[VarsEnum.AZURE_SUBSCRIPTION_ID.value] = subscription_id
+        if updates:
+            write_dotenv_values(path=deploy_env_path, updates=updates, create=True)
+            print(f"🔑 [env] Updated {deploy_env_path} with derived Azure IDs")
     if oidc_client_id and subscription_id:
         ensure_oidc_app_role_assignment(
             subscription_id=subscription_id, 
@@ -455,7 +536,7 @@ def main() -> None:
     image = resolve_value(
         name="image",
         arg_value=args.image,
-        env_names=["CONTAINER_IMAGE", "IMAGE", "GHCR_IMAGE"],
+        env_names=[VarsEnum.CONTAINER_IMAGE.value],
         kv_name=kv_name_for_secrets,
         kv_secret_name=args.image_secret,
         interactive=interactive,
@@ -465,7 +546,7 @@ def main() -> None:
     )
     if not image:
         raise SystemExit(
-            "Missing container image. Provide --image, set GHCR_IMAGE, or store Key Vault secret 'image'."
+            "Missing container image. Provide --image, set CONTAINER_IMAGE, or store Key Vault secret 'image'."
         )
 
     # Resolve build/push mode.
@@ -475,7 +556,7 @@ def main() -> None:
     public_domain = resolve_value(
         name="public_domain",
         arg_value=args.public_domain,
-        env_names=["PUBLIC_DOMAIN", "AZURE_PUBLIC_DOMAIN"],
+        env_names=[VarsEnum.PUBLIC_DOMAIN.value],
         kv_name=kv_name_for_secrets,
         kv_secret_name=args.public_domain_secret,
         interactive=interactive,
@@ -485,13 +566,13 @@ def main() -> None:
     )
     if not public_domain:
         raise SystemExit(
-            "Missing public domain. Provide --public-domain, set AZURE_PUBLIC_DOMAIN, or store Key Vault secret 'public-domain'."
+            "Missing public domain. Provide --public-domain, set PUBLIC_DOMAIN, or store Key Vault secret 'public-domain'."
         )
 
     acme_email = resolve_value(
         name="acme_email",
         arg_value=args.acme_email,
-        env_names=["ACME_EMAIL", "AZURE_ACME_EMAIL"],
+        env_names=[VarsEnum.ACME_EMAIL.value],
         kv_name=kv_name_for_secrets,
         kv_secret_name=args.acme_email_secret,
         interactive=interactive,
@@ -501,13 +582,13 @@ def main() -> None:
     )
     if not acme_email:
         raise SystemExit(
-            "Missing ACME email. Provide --acme-email, set AZURE_ACME_EMAIL, or store Key Vault secret 'acme-email'."
+            "Missing ACME email. Provide --acme-email, set ACME_EMAIL, or store Key Vault secret 'acme-email'."
         )
 
     basic_auth_user = resolve_value(
         name="basic_auth_user",
         arg_value=args.basic_auth_user,
-        env_names=["BASIC_AUTH_USER"],
+        env_names=[VarsEnum.BASIC_AUTH_USER.value],
         kv_name=kv_name_for_secrets,
         kv_secret_name=args.basic_auth_user_secret,
         interactive=interactive,
@@ -521,7 +602,7 @@ def main() -> None:
     basic_auth_hash_or_password = resolve_value(
         name="basic_auth_hash",
         arg_value=args.basic_auth_hash,
-        env_names=["BASIC_AUTH_HASH"],
+        env_names=[SecretsEnum.BASIC_AUTH_HASH.value],
         kv_name=kv_name_for_secrets,
         kv_secret_name=args.basic_auth_hash_secret,
         interactive=False,
@@ -543,20 +624,13 @@ def main() -> None:
 
     if not basic_auth_hash:
         # Ask for password and compute the bcrypt hash (Caddy-compatible).
-        basic_auth_password = resolve_value(
-            name="basic_auth_password",
-            arg_value=args.basic_auth_password,
-            env_names=["BASIC_AUTH_PASSWORD"],
-            kv_name=kv_name_for_secrets,
-            kv_secret_name=None,
-            interactive=interactive,
-            secret=True,
-            prompt_label="Basic Auth password",
-            persist_to_kv=False,
-        )
+        # Intentionally NOT loaded from env files.
+        basic_auth_password = (args.basic_auth_password or "").strip()
+        if not basic_auth_password and interactive:
+            basic_auth_password = prompt_secret("Basic Auth password")
         if not basic_auth_password:
             raise SystemExit(
-                "Missing Basic Auth password. Provide --basic-auth-password (or BASIC_AUTH_PASSWORD), or store Key Vault secret 'basic-auth-hash'."
+                "Missing Basic Auth password. Provide --basic-auth-password, or store Key Vault secret 'basic-auth-hash'."
             )
 
         try:
@@ -584,7 +658,7 @@ def main() -> None:
 
     # Optional registry credentials for private images (e.g. GHCR).
     # If deploying a public image, do not prompt for registry settings.
-    ghcr_private = truthy(os.getenv("GHCR_PRIVATE"))
+    ghcr_private = truthy(os.getenv(VarsEnum.GHCR_PRIVATE.value))
 
     # If the image is private and the user didn't specify any build/push flags,
     # default to publishing the image so a single command works end-to-end.
@@ -596,105 +670,64 @@ def main() -> None:
             build_requested = True
             push_requested = True
 
-    registry_username_seed = (args.registry_username or os.getenv("REGISTRY_USERNAME") or os.getenv("GHCR_USERNAME") or "").strip()
-    registry_password_seed = (args.registry_password or os.getenv("REGISTRY_PASSWORD") or os.getenv("GHCR_TOKEN") or "").strip()
-    registry_server_seed = (args.registry_server or os.getenv("REGISTRY_SERVER") or "").strip()
-
-    wants_registry_creds = ghcr_private or push_requested or any(
-        [
-            bool(registry_username_seed),
-            bool(registry_password_seed),
-            bool(registry_server_seed),
-            args.registry_server is not None,
-            args.registry_username is not None,
-            args.registry_password is not None,
-        ]
-    )
-
+    # GHCR-only: when the image is private (or we are pushing), require GHCR credentials.
     registry_server: str | None = None
     registry_username: str | None = None
     registry_password: str | None = None
 
+    wants_registry_creds = bool(ghcr_private or push_requested)
     if wants_registry_creds:
-        inferred_registry, _ = parse_image_ref(image)
-        inferred_registry = inferred_registry or ("ghcr.io" if image.startswith("ghcr.io/") else None)
+        registry_server = "ghcr.io"
 
-        # When pulling from a private GHCR image, infer the registry server from the image
-        # so the user does not get prompted for it.
-        registry_server_arg = args.registry_server
-        if registry_server_arg is None and not registry_server_seed and (ghcr_private or push_requested) and inferred_registry:
-            registry_server_arg = inferred_registry
-
-        registry_server = resolve_value(
-            name="registry_server",
-            arg_value=registry_server_arg,
-            env_names=["REGISTRY_SERVER"],
-            kv_name=kv_name_for_secrets,
-            kv_secret_name=args.registry_server_secret,
-            interactive=interactive,
-            secret=False,
-            prompt_label="Registry server",
-            default="ghcr.io" if image.startswith("ghcr.io/") else None,
-            persist_to_kv=persist_to_kv,
-        )
-
-        # Infer username for GHCR if not provided
+        # Default username from image owner if it's a ghcr.io/<owner>/... ref.
         registry_username_default = None
-        if not args.registry_username and not registry_username_seed and image.startswith("ghcr.io/"):
+        if image.startswith("ghcr.io/"):
             try:
-                # ghcr.io/owner/repo
                 registry_username_default = image.split("/")[1]
             except IndexError:
                 pass
 
         registry_username = resolve_value(
-            name="registry_username",
-            arg_value=args.registry_username,
-            env_names=["REGISTRY_USERNAME", "GHCR_USERNAME"],
+            name="ghcr_username",
+            arg_value=None,
+            env_names=[VarsEnum.GHCR_USERNAME.value],
             kv_name=kv_name_for_secrets,
-            kv_secret_name=args.registry_username_secret,
+            kv_secret_name=None,
             interactive=interactive,
             secret=False,
-            prompt_label="Registry username",
-            persist_to_kv=persist_to_kv,
+            prompt_label="GHCR username",
+            persist_to_kv=False,
             default=registry_username_default,
         )
 
         registry_password = resolve_value(
-            name="registry_password",
-            arg_value=args.registry_password,
-            env_names=["REGISTRY_PASSWORD", "GHCR_TOKEN"],
+            name="ghcr_token",
+            arg_value=None,
+            env_names=[SecretsEnum.GHCR_TOKEN.value],
             kv_name=kv_name_for_secrets,
-            kv_secret_name=args.registry_password_secret,
+            kv_secret_name=None,
             interactive=interactive,
             secret=True,
-            prompt_label="Registry token/password",
-            persist_to_kv=persist_to_kv,
+            prompt_label="GHCR token",
+            persist_to_kv=False,
         )
 
-        if ghcr_private and not (registry_server and registry_username and registry_password):
+        if ghcr_private and not (registry_username and registry_password):
             raise SystemExit(
-                "GHCR_PRIVATE=true but registry credentials are incomplete. Set GHCR_USERNAME/GHCR_TOKEN (and optionally REGISTRY_SERVER=ghcr.io) or pass --registry-*."
+                "GHCR_PRIVATE=true but GHCR credentials are incomplete. Set GHCR_USERNAME/GHCR_TOKEN."
             )
 
     # If we are pushing, ensure we have registry info/creds.
     if push_requested:
-        inferred_registry, _ = parse_image_ref(image)
-        inferred_registry = inferred_registry or ("ghcr.io" if image.startswith("ghcr.io/") else None)
-
-        # If user didn't set REGISTRY_SERVER, infer it from image.
-        if not registry_server and inferred_registry:
-            registry_server = inferred_registry
-
         if not registry_server:
             raise SystemExit(
-                "Cannot determine registry server for push. Set REGISTRY_SERVER (e.g. ghcr.io) or pass --registry-server."
+                "Cannot determine registry server for push. For GHCR-only mode, set GHCR_PRIVATE=true and ensure CONTAINER_IMAGE is a ghcr.io/... ref."
             )
 
         # For pushes, credentials are required even if the image is public.
         if not (registry_username and registry_password):
             raise SystemExit(
-                "--push/--build-push requires registry credentials. Set GHCR_USERNAME/GHCR_TOKEN (or REGISTRY_USERNAME/REGISTRY_PASSWORD) or pass --registry-username/--registry-password."
+                "--push/--build-push requires GHCR credentials. Set GHCR_USERNAME/GHCR_TOKEN."
             )
 
     # Build/push before deploy if requested.
@@ -712,7 +745,7 @@ def main() -> None:
                 dockerfile = None
 
         if build_requested:
-            print(f"[docker] building image: {image}")
+            print(f"🏗️  [docker] building image: {image}")
             try:
                 docker_build(image=image, context_dir=docker_context, dockerfile=dockerfile)
             except FileNotFoundError:
@@ -722,7 +755,7 @@ def main() -> None:
             assert registry_server and registry_username and registry_password
             try:
                 docker_login(registry=registry_server, username=registry_username, token=registry_password)
-                print(f"[docker] pushing image: {image}")
+                print(f"📦 [docker] pushing image: {image}")
                 try:
                     docker_push(image=image)
                 except subprocess.CalledProcessError as e:
@@ -752,7 +785,7 @@ def main() -> None:
     run_az_command(["container", "delete", "--resource-group", rg, "--name", name, "--yes"], capture_output=False, ignore_errors=True)
     
     # Wait for container to be fully deleted (not just deletion initiated)
-    print("[deploy] Waiting for previous container to be fully deleted...")
+    print("⏳ [deploy] Waiting for previous container to be fully deleted...")
     max_wait = 120  # seconds
     poll_interval = 5
     waited = 0
@@ -766,21 +799,21 @@ def main() -> None:
         )
         if result is None:
             # Container no longer exists
-            print(f"[deploy] Previous container deleted after {waited}s")
+            print(f"✅ [deploy] Previous container deleted after {waited}s")
             break
         state = str(result).strip().lower()
         if state in ("deleting", "pending"):
-            print(f"[deploy] Container still {state}... waiting")
+            print(f"⏳ [deploy] Container still {state}... waiting")
         time.sleep(poll_interval)
         waited += poll_interval
     else:
-        print(f"[deploy] Warning: Timed out waiting for container deletion after {max_wait}s, proceeding anyway...")
+        print(f"⚠️  [deploy] Timed out waiting for container deletion after {max_wait}s, proceeding anyway...")
 
     caddy_image = (args.caddy_image or "").strip() or "caddy:2-alpine"
 
     if args.prefetch_images:
         try:
-            print(f"[docker] prefetching caddy image: {caddy_image}")
+            print(f"🔎 [docker] prefetching caddy image: {caddy_image}")
             docker_pull(image=caddy_image)
 
             # If we are using GHCR for the main image, mirror Caddy to GHCR as well to avoid
@@ -797,9 +830,9 @@ def main() -> None:
                 caddy_mirror_tag = f"{repo_prefix}/caddy:2-alpine"
 
                 if caddy_image == caddy_mirror_tag:
-                    print(f"[docker] Caddy image already in GHCR namespace: {caddy_image}")
+                    print(f"ℹ️  [docker] Caddy image already in GHCR namespace: {caddy_image}")
                 else:
-                    print(f"[docker] Mirroring caddy to GHCR: {caddy_mirror_tag}")
+                    print(f"🔁 [docker] Mirroring caddy to GHCR: {caddy_mirror_tag}")
                     try:
                         # Retag
                         subprocess.run(["docker", "tag", caddy_image, caddy_mirror_tag], check=True, capture_output=True)
@@ -807,17 +840,28 @@ def main() -> None:
                         docker_push(image=caddy_mirror_tag)
                         # Use the mirrored image in the YAML
                         caddy_image = caddy_mirror_tag
-                        print(f"[docker] Successfully mirrored caddy. Using: {caddy_image}")
+                        print(f"✅ [docker] Successfully mirrored caddy. Using: {caddy_image}")
                     except subprocess.CalledProcessError as e:
                         hint = _hint_for_ghcr_scope_error(getattr(e, "stderr", None))
                         if hint:
                             print(hint, file=sys.stderr)
-                        print(f"[warn] Failed to mirror caddy to GHCR ({e}); falling back to {caddy_image}", file=sys.stderr)
+                        print(f"⚠️  [warn] Failed to mirror caddy to GHCR ({e}); falling back to {caddy_image}", file=sys.stderr)
                     except Exception as e:
-                        print(f"[warn] Failed to mirror caddy to GHCR ({e}); falling back to {caddy_image}", file=sys.stderr)
+                        print(f"⚠️  [warn] Failed to mirror caddy to GHCR ({e}); falling back to {caddy_image}", file=sys.stderr)
 
         except Exception as e:
-            print(f"[warn] Could not prefetch caddy image locally ({e}); continuing.", file=sys.stderr)
+            print(f"⚠️  [warn] Could not prefetch caddy image locally ({e}); continuing.", file=sys.stderr)
+
+    cpu_cores = float(
+        args.cpu
+        if args.cpu is not None
+        else (os.getenv(VarsEnum.DEFAULT_CPU_CORES.value) or str(DEFAULT_CPU_CORES))
+    )
+    memory_gb = float(
+        args.memory
+        if args.memory is not None
+        else (os.getenv(VarsEnum.DEFAULT_MEMORY_GB.value) or str(DEFAULT_MEMORY_GB))
+    )
 
     yaml_text = generate_deploy_yaml(
         name=name,
@@ -837,8 +881,8 @@ def main() -> None:
         acme_email=acme_email,
         basic_auth_user=basic_auth_user,
         basic_auth_hash=basic_auth_hash,
-        cpu_cores=args.cpu,
-        memory_gb=args.memory,
+        cpu_cores=cpu_cores,
+        memory_gb=memory_gb,
         share_workspace=share_workspace,
         caddy_data_share_name=caddy_data_share,
         caddy_config_share_name=caddy_config_share,
@@ -849,7 +893,7 @@ def main() -> None:
         f.write(yaml_text)
         yaml_path = f.name
 
-    print(f"[deploy] wrote: {yaml_path}")
+    print(f"📝 [deploy] wrote: {yaml_path}")
 
     # Retry container creation with exponential backoff for transient registry errors
     max_retries = 5
@@ -867,7 +911,7 @@ def main() -> None:
             is_transient = "RegistryErrorResponse" in err or "Conflict" in err
             if is_transient and attempt < max_retries:
                 sleep_time = min(60.0, base_delay * (2 ** (attempt - 1)))
-                print(f"[deploy] Registry conflict error (attempt {attempt}/{max_retries}). Retrying in {sleep_time:.0f}s...")
+                print(f"⚠️  [deploy] Registry conflict (attempt {attempt}/{max_retries}). Retrying in {sleep_time:.0f}s...")
                 time.sleep(sleep_time)
             else:
                 # Not a transient error or out of retries

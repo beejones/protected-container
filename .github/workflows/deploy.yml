@@ -204,39 +204,67 @@ jobs:
         docker tag caddy:2-alpine $CADDY_MIRROR
         docker push $CADDY_MIRROR
 
+    - name: Create .env.deploy from vars/secrets
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        # Deployment settings come from `.env` then `.env.deploy`.
+        # `.env` is created from RUNTIME_ENV_DOTENV above.
+        # `.env.deploy` is generated here from repo vars/secrets and workflow inputs.
+
+        if [ -z "${{ vars.PUBLIC_DOMAIN }}" ]; then
+          echo "::error::Missing repo variable PUBLIC_DOMAIN"
+          exit 1
+        fi
+        if [ -z "${{ vars.ACME_EMAIL }}" ]; then
+          echo "::error::Missing repo variable ACME_EMAIL"
+          exit 1
+        fi
+        if [ -z "${{ secrets.GHCR_TOKEN }}" ]; then
+          echo "::error::Missing repo secret GHCR_TOKEN"
+          exit 1
+        fi
+
+        cat > .env.deploy <<'EOF'
+AZURE_CLIENT_ID=${{ vars.AZURE_CLIENT_ID }}
+AZURE_TENANT_ID=${{ vars.AZURE_TENANT_ID }}
+AZURE_SUBSCRIPTION_ID=${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+AZURE_RESOURCE_GROUP=${{ vars.AZURE_RESOURCE_GROUP || 'protected-azure-container-rg' }}
+AZURE_LOCATION=${{ inputs.location }}
+AZURE_CONTAINER_NAME=${{ vars.AZURE_CONTAINER_NAME || 'protected-azure-container' }}
+
+CONTAINER_IMAGE=ghcr.io/${{ github.repository }}:latest
+
+PUBLIC_DOMAIN=${{ vars.PUBLIC_DOMAIN }}
+ACME_EMAIL=${{ vars.ACME_EMAIL }}
+
+GHCR_PRIVATE=true
+GHCR_USERNAME=${{ vars.GHCR_USERNAME || github.actor }}
+GHCR_TOKEN=${{ secrets.GHCR_TOKEN }}
+EOF
+
+        chmod 600 .env.deploy
+
+    - name: Validate .env and .env.deploy
+      run: |
+        python3 scripts/deploy/validate_env.py
+
     - name: Deploy to Azure
       id: deploy
       continue-on-error: true
-      env:
-        # Map repository vars/secrets to env vars the script expects
-        AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-        AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-        AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-        
-        # Deploy config (defaults or overrides)
-        AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'protected-azure-container-rg' }}
-        AZURE_LOCATION: ${{ inputs.location }}
-        AZURE_CONTAINER_NAME: ${{ vars.AZURE_CONTAINER_NAME || 'protected-azure-container' }}
-        CONTAINER_IMAGE: ghcr.io/${{ github.repository }}:latest
-        # Use vars set by gh_sync_actions_env.py (PUBLIC_DOMAIN, ACME_EMAIL)
-        PUBLIC_DOMAIN: ${{ vars.PUBLIC_DOMAIN || vars.AZURE_PUBLIC_DOMAIN }}
-        ACME_EMAIL: ${{ vars.ACME_EMAIL || vars.AZURE_ACME_EMAIL }}
-        BASIC_AUTH_USER: ${{ vars.BASIC_AUTH_USER }}
-        BASIC_AUTH_HASH: ${{ secrets.BASIC_AUTH_HASH }}
-        # Registry credentials for ACI to pull the private image
-        GHCR_PRIVATE: "true"
-        GHCR_USERNAME: ${{ github.actor }}
-        GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
       run: |
         set -euo pipefail
         # Use --no-interactive to ensure no prompts
         # Use --no-set-vars-secrets because we are already running in Actions
         # Use --no-publish because we already built and pushed above
-        python3 scripts/azure_deploy_container.py \
+        python3 scripts/deploy/azure_deploy_container.py \
           --no-interactive \
           --no-set-vars-secrets \
           --no-publish \
           --upload-env \
+          --env-file .env.deploy \
           --caddy-image ghcr.io/${{ github.repository }}/caddy:2-alpine \
           2>&1 | tee deploy.log
 

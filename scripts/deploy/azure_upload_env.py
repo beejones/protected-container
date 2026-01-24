@@ -9,7 +9,7 @@ Prereqs:
 - Key Vault exists
 
 Example:
-  python scripts/azure_upload_env.py --vault <kv-name> --env-file .env
+    python scripts/deploy/azure_upload_env.py --vault <kv-name> --env-file .env
 """
 
 from __future__ import annotations
@@ -28,6 +28,15 @@ except ImportError:
     sys.path.append("scripts")
     from azure_utils import kv_secret_set_quiet
 
+from env_schema import (
+    RUNTIME_SCHEMA,
+    EnvValidationError,
+    apply_defaults,
+    parse_dotenv_file,
+    validate_known_keys,
+    validate_required,
+)
+
 
 
 
@@ -36,6 +45,16 @@ def _upload_env_to_keyvault(*, vault_name: str, env_file: Path, secret_name: str
     if not env_file.exists():
         print(f"[error] File not found: {env_file}")
         raise SystemExit(1)
+
+    # Validate env file against strict runtime schema.
+    try:
+        kv = parse_dotenv_file(env_file)
+        validate_known_keys(RUNTIME_SCHEMA, kv, context=f"runtime ({env_file.name})")
+        kv = apply_defaults(RUNTIME_SCHEMA, kv)
+        validate_required(RUNTIME_SCHEMA, kv, context=f"runtime ({env_file.name})")
+    except EnvValidationError as e:
+        print(e.format(), file=sys.stderr)
+        raise SystemExit(2)
 
     content = env_file.read_text()
     lines = [l for l in content.splitlines() if l.strip() and not l.strip().startswith("#")]

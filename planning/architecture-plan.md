@@ -151,7 +151,7 @@ TLS configuration with automatic cert management:
 ### Phase 2: Azure Integration
 
 ---
-There is only one main deployment script which is scripts/azure_deploy-container.py. With this one single script we can deploy the container and the caddy sidecar.
+There is only one main deployment script which is scripts/deploy/azure_deploy_container.py. With this one single script we can deploy the container and the caddy sidecar.
 
 #### [MODIFY] [scripts/azure_start.py](file:///home/ronny/dev/protected-azure-container/scripts/azure_start.py)
 
@@ -162,7 +162,7 @@ Update entrypoint to:
 
 ---
 
-#### [MODIFY] [scripts/azure_deploy-container.py](file:///home/ronny/dev/protected-azure-container/scripts/azure_deploy-container.py)
+#### [MODIFY] scripts/deploy/azure_deploy_container.py
 
 Update ACI deployment to:
 - Add Caddy as sidecar container
@@ -246,7 +246,7 @@ tests/pytests will have to be updated. Use in ci.yml
    - Verify VS Code interface loads after authentication
 
 2. **Azure Deployment**
-   - Deploy using `scripts/azure_deploy-container.py`
+  - Deploy using `scripts/deploy/azure_deploy_container.py`
    - Access `https://<your-domain>/`
    - Verify TLS certificate is valid (Let's Encrypt)
    - Verify Key Vault secrets are loaded

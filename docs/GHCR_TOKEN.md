@@ -25,7 +25,7 @@ Notes:
 
 ## Where to put it
 
-Local deploy (ACI via `scripts/azure_deploy_container.py`): set these in `.env.deploy`:
+Local deploy (ACI via `scripts/deploy/azure_deploy_container.py`): set these in `.env.deploy`:
 
 - `GHCR_PRIVATE=true`
 - `GHCR_USERNAME=<your-github-username-or-org>`
@@ -35,9 +35,9 @@ GitHub Actions deploy:
 - store `GHCR_TOKEN` as a repository **Secret**
 - store `GHCR_USERNAME` as a repository **Variable**
 
-If you use `python3 scripts/gh_sync_actions_env.py --set`, it will sync these from `.env.deploy`.
+If you use `python3 scripts/deploy/gh_sync_actions_env.py --set`, it will sync these from `.env.deploy`.
 
-Note: `python3 scripts/azure_deploy_container.py` (run locally) syncs GitHub Actions vars/secrets by default; use `--no-set-vars-secrets` to disable (CI does this).
+Note: `python3 scripts/deploy/azure_deploy_container.py` (run locally) syncs GitHub Actions vars/secrets by default; use `--no-set-vars-secrets` to disable (CI does this).
 
 ## GitHub Actions: Package Permissions
 

@@ -142,7 +142,7 @@ def run_az_command(args: list[str], *, capture_output: bool = True, ignore_error
     """Run an azure cli command."""
     cmd = ["az"] + args
     if verbose:
-        print(f"[az] {' '.join(cmd)}")
+        print(f"☁️  [az] {' '.join(cmd)}")
 
     # Check if az is installed
     if not shutil.which("az"):
