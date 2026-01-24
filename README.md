@@ -45,6 +45,7 @@ Internet → Caddy (443) → [Basic Auth] → code-server (8080)
 - [Azure Container Deployment](docs/deploy/AZURE_CONTAINER.md) - Deploy to Azure Container Instances
 - [code-server Setup](docs/CODE_SERVER.md) - Configuration and customization
 - [Env Schema](docs/deploy/ENV_SCHEMA.md) - How to add vars/secrets to the schema
+- [Add Your App](docs/deploy/ADD_YOUR_APP.md) - How to bundle and run your own app in this container
 
 ## Use This Repo As A Template
 
