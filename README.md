@@ -42,8 +42,49 @@ Internet → Caddy (443) → [Basic Auth] → code-server (8080)
 
 ## Documentation
 
-- [Azure Container Deployment](docs/AZURE_CONTAINER.md) - Deploy to Azure Container Instances
+- [Azure Container Deployment](docs/deploy/AZURE_CONTAINER.md) - Deploy to Azure Container Instances
 - [code-server Setup](docs/CODE_SERVER.md) - Configuration and customization
+- [Env Schema](docs/deploy/ENV_SCHEMA.md) - How to add vars/secrets to the schema
+
+## Use This Repo As A Template
+
+If you want to use this project as a base for a new repo that needs a protected Azure container:
+
+### Option A: GitHub template flow (recommended)
+
+Use GitHub’s “Use this template” button, or use `gh` with the current repo as the template:
+
+```bash
+gh repo create <your-org>/<new-repo> --public --template beejones/protected-azure-container
+```
+
+Note: template-based repos are a snapshot. They do not automatically stay connected to this repo for future updates.
+
+### Option B: Clone and re-init git
+
+```bash
+git clone https://github.com/beejones/protected-azure-container.git my-new-repo
+cd my-new-repo
+
+# Keep a link to the original repo so you can pull updates later
+git remote rename origin upstream
+
+# Point "origin" at your new repo
+git remote add origin git@github.com:<your-org>/<new-repo>.git
+
+# Push your new repo
+git push -u origin main
+```
+
+Later, you can pull changes from this repo with:
+
+```bash
+git pull upstream main
+```
+
+After that, update the deployment settings in `.env.deploy` and runtime settings in `.env`.
+
+When you need to add new configuration keys, follow the schema guide: [docs/deploy/ENV_SCHEMA.md](docs/deploy/ENV_SCHEMA.md).
 
 ## Pre-installed Extensions
 
@@ -59,6 +100,7 @@ This repo uses a strict, schema-driven set of env keys.
 - Deployment reads `.env` first, then `.env.deploy` on top (deploy-time overrides).
 
 See env.example and env.deploy.example for the canonical keys.
+If you need to add a new key, follow: [docs/deploy/ENV_SCHEMA.md](docs/deploy/ENV_SCHEMA.md).
 
 ## License
 
