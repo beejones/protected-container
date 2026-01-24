@@ -15,9 +15,9 @@ Requirements:
 - Permission to set Actions secrets/vars on the repo
 
 Examples:
-  python3 scripts/gh_sync_actions_env.py --set
-  python3 scripts/gh_sync_actions_env.py --set --also-sync-keys
-  python3 scripts/gh_sync_actions_env.py --repo owner/repo --set
+    python3 scripts/deploy/gh_sync_actions_env.py --set
+    python3 scripts/deploy/gh_sync_actions_env.py --set --also-sync-keys
+    python3 scripts/deploy/gh_sync_actions_env.py --repo owner/repo --set
 """
 
 from __future__ import annotations
@@ -34,6 +34,21 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
+from env_schema import (
+    DEPLOY_SCHEMA,
+    RUNTIME_SCHEMA,
+    EnvTarget,
+    EnvValidationError,
+    SecretsEnum,
+    VarsEnum,
+    apply_defaults,
+    parse_dotenv_file,
+    truthy,
+    validate_cross_field_rules,
+    validate_known_keys,
+    validate_required,
+)
+
 # Add scripts dir to path to allow importing azure_utils
 sys.path.append(str(Path(__file__).parent))
 try:
@@ -43,21 +58,10 @@ except ImportError:
     from azure_utils import run_az_command, get_az_account_info, get_app_client_id_by_display_name
 
 
-SECRET_KEY_RE = re.compile(r"(TOKEN|PASSWORD|SECRET|KEY|HASH)$")
-
-
-# Keys which should always be treated as GitHub Actions *variables* (not secrets).
-FORCE_VARIABLE_KEYS = {
-    "AZURE_CLIENT_ID",
-    "AZURE_TENANT_ID",
-    "AZURE_SUBSCRIPTION_ID",
-}
-
-
 REQUIRED_FOR_AZURE_LOGIN = {
-    "AZURE_CLIENT_ID",
-    "AZURE_TENANT_ID",
-    "AZURE_SUBSCRIPTION_ID",
+    VarsEnum.AZURE_CLIENT_ID.value,
+    VarsEnum.AZURE_TENANT_ID.value,
+    VarsEnum.AZURE_SUBSCRIPTION_ID.value,
 }
 
 
@@ -102,9 +106,6 @@ def _detect_default_branch(repo: str) -> str | None:
 
 
 def _detect_current_branch() -> str | None:
-    env_branch = (os.getenv("GITHUB_REF_NAME") or "").strip()
-    if env_branch:
-        return env_branch
     try:
         branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"]).strip()
     except Exception:
@@ -354,7 +355,7 @@ def main() -> None:
 
     if dry_run:
         print("[dry-run] No changes will be made.")
-        print("[dry-run] Re-run with: python3 scripts/gh_sync_actions_env.py --set")
+        print("[dry-run] Re-run with: python3 scripts/deploy/gh_sync_actions_env.py --set")
 
     deploy_path = Path(args.deploy_env).expanduser().resolve()
     runtime_path = Path(args.runtime_env).expanduser().resolve()
@@ -362,35 +363,43 @@ def main() -> None:
     deploy_text = _read_text(deploy_path)
     runtime_text = _read_text(runtime_path)
 
-    deploy_kv = dotenv_values(stream=io.StringIO(deploy_text))
+    # Strict validation of dotenv inputs (no unknown keys, no legacy aliases).
+    try:
+        deploy_kv = parse_dotenv_file(deploy_path)
+        runtime_kv = parse_dotenv_file(runtime_path)
+
+        validate_known_keys(DEPLOY_SCHEMA, deploy_kv, context="deploy (.env.deploy)")
+        validate_known_keys(RUNTIME_SCHEMA, runtime_kv, context="runtime (.env)")
+
+        # Apply defaults and validate required keys for the dotenv portions.
+        runtime_kv = apply_defaults(RUNTIME_SCHEMA, runtime_kv)
+        validate_required(RUNTIME_SCHEMA, runtime_kv, context="runtime (.env)")
+
+        deploy_kv = apply_defaults(DEPLOY_SCHEMA, deploy_kv)
+        # Only require keys that belong to deploy dotenv.
+        deploy_dotenv_specs = [spec for spec in DEPLOY_SCHEMA if EnvTarget.DOTENV_DEPLOY in spec.targets]
+        validate_required(deploy_dotenv_specs, deploy_kv, context="deploy (.env.deploy)")
+        validate_cross_field_rules(deploy_kv=deploy_kv, context="deploy (.env.deploy)")
+    except EnvValidationError as e:
+        raise SystemExit(e.format())
 
     # Ensure required Azure login vars are present as GitHub Actions VARIABLES.
-    # The deploy workflow uses these directly; they are not pulled from DEPLOY_ENV_DOTENV.
-    env_azure_client_id = (os.getenv("AZURE_CLIENT_ID") or "").strip()
-    env_azure_app_id = (os.getenv("AZURE_APP_ID") or "").strip()
-    env_azure_tenant_id = (os.getenv("AZURE_TENANT_ID") or "").strip()
-    env_azure_subscription_id = (os.getenv("AZURE_SUBSCRIPTION_ID") or "").strip()
-
-    azure_app_id = str((deploy_kv.get("AZURE_APP_ID") or env_azure_app_id) or "").strip()
-
-    azure_client_id = str(
-        (args.azure_client_id or deploy_kv.get("AZURE_CLIENT_ID") or env_azure_client_id or azure_app_id) or ""
-    ).strip()
-    azure_tenant_id = str((deploy_kv.get("AZURE_TENANT_ID") or env_azure_tenant_id) or "").strip()
-    azure_subscription_id = str((deploy_kv.get("AZURE_SUBSCRIPTION_ID") or env_azure_subscription_id) or "").strip()
+    azure_client_id = str((args.azure_client_id or deploy_kv.get(VarsEnum.AZURE_CLIENT_ID.value)) or "").strip()
+    azure_tenant_id = str((deploy_kv.get(VarsEnum.AZURE_TENANT_ID.value)) or "").strip()
+    azure_subscription_id = str((deploy_kv.get(VarsEnum.AZURE_SUBSCRIPTION_ID.value)) or "").strip()
 
     if args.auto_fill_azure_ids:
         info = get_az_account_info()
         if not azure_tenant_id:
             azure_tenant_id = info.get("tenantId") or ""
             if azure_tenant_id:
-                print("[info] Filled AZURE_TENANT_ID from az account show")
+                print("ℹ️  [info] Filled AZURE_TENANT_ID from az account show")
         if not azure_subscription_id:
             azure_subscription_id = info.get("id") or ""
             if azure_subscription_id:
-                print("[info] Filled AZURE_SUBSCRIPTION_ID from az account show")
+                print("ℹ️  [info] Filled AZURE_SUBSCRIPTION_ID from az account show")
 
-        azure_app_display_name = (args.azure_app_display_name or os.getenv("AZURE_APP_DISPLAY_NAME") or "").strip()
+        azure_app_display_name = (args.azure_app_display_name or "").strip()
         if not azure_client_id and azure_app_display_name:
             azure_client_id = get_app_client_id_by_display_name(azure_app_display_name) or ""
         if not azure_client_id and args.auto_fill_azure_client_id:
@@ -405,24 +414,23 @@ def main() -> None:
     missing_required = [
         k
         for k, v in (
-            ("AZURE_CLIENT_ID", azure_client_id),
-            ("AZURE_TENANT_ID", azure_tenant_id),
-            ("AZURE_SUBSCRIPTION_ID", azure_subscription_id),
+            (VarsEnum.AZURE_CLIENT_ID.value, azure_client_id),
+            (VarsEnum.AZURE_TENANT_ID.value, azure_tenant_id),
+            (VarsEnum.AZURE_SUBSCRIPTION_ID.value, azure_subscription_id),
         )
         if not str(v or "").strip()
     ]
     if missing_required:
-        print(
-            "[warn] Missing Azure OIDC values needed by the deploy workflow: "
+        raise SystemExit(
+            "[env] Missing Azure OIDC values needed by the deploy workflow: "
             + ", ".join(missing_required)
-            + ". Set them in .env.deploy (or pass --azure-client-id / --azure-app-display-name for AZURE_CLIENT_ID; "
-            + "or set AZURE_APP_ID/AZURE_APP_DISPLAY_NAME env vars)."
+            + ". Set them in .env.deploy or pass --azure-client-id / --azure-app-display-name."
         )
 
     if azure_client_id:
-        _set_variable(repo=repo, name="AZURE_CLIENT_ID", value=azure_client_id, dry_run=dry_run)
+        _set_variable(repo=repo, name=VarsEnum.AZURE_CLIENT_ID.value, value=azure_client_id, dry_run=dry_run)
         if args.ensure_federated_credential and not dry_run:
-            explicit_subject = (args.oidc_subject or os.getenv("AZURE_OIDC_SUBJECT") or "").strip()
+            explicit_subject = (args.oidc_subject or "").strip()
             subjects: set[str] = set()
             if explicit_subject:
                 subjects.add(explicit_subject)
@@ -439,26 +447,22 @@ def main() -> None:
             for subject in sorted(subjects):
                 _ensure_federated_credential(app_id=azure_client_id, repo=repo, subject=subject)
     if azure_tenant_id:
-        _set_variable(repo=repo, name="AZURE_TENANT_ID", value=azure_tenant_id, dry_run=dry_run)
+        _set_variable(repo=repo, name=VarsEnum.AZURE_TENANT_ID.value, value=azure_tenant_id, dry_run=dry_run)
     if azure_subscription_id:
-        _set_variable(repo=repo, name="AZURE_SUBSCRIPTION_ID", value=azure_subscription_id, dry_run=dry_run)
+        _set_variable(repo=repo, name=VarsEnum.AZURE_SUBSCRIPTION_ID.value, value=azure_subscription_id, dry_run=dry_run)
 
     # 1) Always store runtime dotenv as a secret.
-    _set_secret(repo=repo, name="RUNTIME_ENV_DOTENV", value=runtime_text, dry_run=dry_run)
+    _set_secret(repo=repo, name=SecretsEnum.RUNTIME_ENV_DOTENV.value, value=runtime_text, dry_run=dry_run)
 
     # 1b) Also sync specific runtime keys needed by the workflow directly.
-    # Parse the runtime env to extract individual values.
-    runtime_kv = dotenv_values(stream=io.StringIO(runtime_text))
-    
-    # BASIC_AUTH_USER -> variable
-    basic_auth_user = str(runtime_kv.get("BASIC_AUTH_USER") or "").strip()
-    if basic_auth_user:
-        _set_variable(repo=repo, name="BASIC_AUTH_USER", value=basic_auth_user, dry_run=dry_run)
-    
-    # BASIC_AUTH_HASH -> secret (contains bcrypt hash)
-    basic_auth_hash = str(runtime_kv.get("BASIC_AUTH_HASH") or "").strip()
-    if basic_auth_hash:
-        _set_secret(repo=repo, name="BASIC_AUTH_HASH", value=basic_auth_hash, dry_run=dry_run)
+    for spec in RUNTIME_SCHEMA:
+        val = str(runtime_kv.get(spec.key.value) or "").strip()
+        if not val:
+            continue
+        if EnvTarget.GH_ACTIONS_VAR in spec.targets:
+            _set_variable(repo=repo, name=spec.key.value, value=val, dry_run=dry_run)
+        if EnvTarget.GH_ACTIONS_SECRET in spec.targets:
+            _set_secret(repo=repo, name=spec.key.value, value=val, dry_run=dry_run)
 
     if args.only_files:
         return
@@ -466,29 +470,23 @@ def main() -> None:
     if not args.also_sync_keys:
         return
 
-    # 2) Optionally sync deploy-time keys.
-    for k, v in deploy_kv.items():
-        if v is None:
+    # 2) Optionally sync deploy-time keys, strictly derived from schema targets.
+    for spec in DEPLOY_SCHEMA:
+        # Already handled above.
+        if spec.key.value in REQUIRED_FOR_AZURE_LOGIN:
             continue
-        key = str(k).strip()
-        val = str(v).strip()
-        if not key or not val:
-            continue
-
-        # These are handled above (and may be auto-filled).
-        if key in REQUIRED_FOR_AZURE_LOGIN:
+        # Runtime dotenv file content is already set above.
+        if spec.key == SecretsEnum.RUNTIME_ENV_DOTENV:
             continue
 
-        # Force variables for known non-secret keys.
-        if key in FORCE_VARIABLE_KEYS:
-            _set_variable(repo=repo, name=key, value=val, dry_run=dry_run)
+        val = str(deploy_kv.get(spec.key.value) or "").strip()
+        if not val:
             continue
 
-        # Heuristic: secrets for tokens/passwords/keys/hashes; variables for the rest.
-        if SECRET_KEY_RE.search(key):
-            _set_secret(repo=repo, name=key, value=val, dry_run=dry_run)
-        else:
-            _set_variable(repo=repo, name=key, value=val, dry_run=dry_run)
+        if EnvTarget.GH_ACTIONS_VAR in spec.targets:
+            _set_variable(repo=repo, name=spec.key.value, value=val, dry_run=dry_run)
+        if EnvTarget.GH_ACTIONS_SECRET in spec.targets:
+            _set_secret(repo=repo, name=spec.key.value, value=val, dry_run=dry_run)
 
 
 if __name__ == "__main__":

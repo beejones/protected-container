@@ -80,7 +80,7 @@ Authentication is handled by Caddy (not code-server):
 
 3. Upload to Key Vault (production):
    ```bash
-   python scripts/azure_upload_env.py --vault my-vault --env-file .env
+   python scripts/deploy/azure_upload_env.py --vault my-vault --env-file .env
    ```
 
 4. Restart container

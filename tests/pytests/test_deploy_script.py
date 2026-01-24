@@ -1,12 +1,4 @@
-
-import sys
-from pathlib import Path
-
-# Add scripts to path
-scripts_dir = Path(__file__).parents[2] / "scripts"
-sys.path.append(str(scripts_dir))
-
-from azure_deploy_container import generate_deploy_yaml
+from scripts.deploy.azure_deploy_container import generate_deploy_yaml
 
 def test_generate_deploy_yaml_structure():
     yaml_out = generate_deploy_yaml(

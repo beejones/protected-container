@@ -1,16 +1,10 @@
-
-import sys
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Add scripts to path
-scripts_dir = Path(__file__).parents[2] / "scripts"
-sys.path.append(str(scripts_dir))
-
-from azure_utils import (
+from scripts.deploy.azure_utils import (
     run_az_command,
     get_az_account_info,
     get_app_client_id_by_display_name,
@@ -38,7 +32,7 @@ def test_run_az_command_failure():
             run_az_command(["group", "list"], verbose=False)
 
 def test_get_app_client_id_by_display_name():
-    with patch("azure_utils.run_az_command") as mock_az:
+    with patch("scripts.deploy.azure_utils.run_az_command") as mock_az:
         # Mock success response
         mock_az.return_value = [{"appId": "0000-1111"}]
         assert get_app_client_id_by_display_name("My App") == "0000-1111"
@@ -62,11 +56,11 @@ def test_kv_secret_set_quiet():
         assert "s3cret" in cmd # Ensure value is passed
 
 def test_kv_data_plane_available_success():
-    with patch("azure_utils.run_az_command") as mock_az:
+    with patch("scripts.deploy.azure_utils.run_az_command") as mock_az:
         mock_az.return_value = []
         assert kv_data_plane_available("mykv") is True
 
 def test_kv_data_plane_available_failure():
-    with patch("azure_utils.run_az_command") as mock_az:
+    with patch("scripts.deploy.azure_utils.run_az_command") as mock_az:
         mock_az.side_effect = subprocess.CalledProcessError(1, ["cmd"], stderr="Failed to resolve")
         assert kv_data_plane_available("mykv") is False

@@ -25,15 +25,17 @@ Internet → Caddy (:443) → [TLS + Basic Auth] → code-server (:8080)
 
 - Azure CLI: `az login`
 - Docker image pushed to GHCR/ACR
-- `.env` file with Basic Auth credentials
-- `.env.deploy` file with Azure configuration
+- `.env` file with Basic Auth credentials (runtime)
+- `.env.deploy` file with Azure + deploy configuration (deploy-time)
+
+Deployment reads `.env` first, then `.env.deploy` on top (deploy-time overrides).
 
 ## Step 1 — Create Azure Resources
 
 The deploy script auto-creates resources if they don't exist:
 
 ```bash
-python scripts/azure_deploy-container.py \
+python scripts/deploy/azure_deploy_container.py \
   --resource-group protected-azure-container-rg \
   --location westeurope
 ```
@@ -62,7 +64,7 @@ BASIC_AUTH_HASH=$2a$14$...your-hash...
 ### Upload to Key Vault
 
 ```bash
-python scripts/azure_upload_env.py \
+python scripts/deploy/azure_upload_env.py \
   --vault protected-azure-container-rg-kv \
   --env-file .env
 ```
@@ -70,7 +72,7 @@ python scripts/azure_upload_env.py \
 ## Step 3 — Deploy to ACI
 
 ```bash
-python scripts/azure_deploy-container.py \
+python scripts/deploy/azure_deploy_container.py \
   --resource-group protected-azure-container-rg \
   --image ghcr.io/your-user/protected-azure-container:latest \
   --public-domain your-domain.com \

@@ -52,20 +52,13 @@ Internet → Caddy (443) → [Basic Auth] → code-server (8080)
 
 ## Environment Variables
 
-### Runtime (`.env` → Key Vault)
+This repo uses a strict, schema-driven set of env keys.
 
-| Variable | Description |
-|----------|-------------|
-| `BASIC_AUTH_USER` | Username for Basic Auth (default: `admin`) |
-| `BASIC_AUTH_HASH` | Bcrypt hash for Basic Auth password |
+- Runtime config lives in `.env` (and is uploaded to Key Vault as a single secret).
+- Deploy-time config lives in `.env.deploy`.
+- Deployment reads `.env` first, then `.env.deploy` on top (deploy-time overrides).
 
-### Deploy-time (`.env.deploy`)
-
-| Variable | Description |
-|----------|-------------|
-| `PUBLIC_DOMAIN` | Your domain for TLS certificate |
-| `ACME_EMAIL` | Email for Let's Encrypt notifications |
-| `AZURE_KEYVAULT_URI` | Key Vault URI (e.g., `https://myvault.vault.azure.net/`) |
+See env.example and env.deploy.example for the canonical keys.
 
 ## License
 
