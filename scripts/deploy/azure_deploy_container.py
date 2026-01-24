@@ -340,6 +340,9 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    if not az_logged_in():
+        raise SystemExit("Not logged into Azure. Run: az login")
+
     # Allow --azure-oidc-app-name to satisfy schema validation by surfacing it as an env var.
     if args.azure_oidc_app_name and str(args.azure_oidc_app_name).strip():
         os.environ[VarsEnum.AZURE_OIDC_APP_NAME.value] = str(args.azure_oidc_app_name).strip()
@@ -417,8 +420,7 @@ def main() -> None:
 
     # (Non-interactive enforcement is handled by --validate-dotenv, enabled by default.)
 
-    if not az_logged_in():
-        raise SystemExit("Not logged into Azure. Run: az login")
+
 
     # Resolve Azure OIDC App (create if missing) so sync script has correct ID.
     # Prioritize: Env EnvVar -> Arg Default -> Lookup/Create

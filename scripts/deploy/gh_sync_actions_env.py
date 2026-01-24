@@ -112,7 +112,15 @@ def _run(cmd: list[str], *, input_text: str | None = None) -> str:
 
 
 def _detect_repo() -> str:
-    # Uses current repo.
+    # Try to resolve 'origin' remote first to avoid defaulting to upstream in forks.
+    try:
+        origin_url = _run(["git", "remote", "get-url", "origin"]).strip()
+        if origin_url:
+            return _run(["gh", "repo", "view", origin_url, "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+    except Exception:
+        pass
+    
+    # Fallback to default detection (uses current directory context)
     return _run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
 
 
