@@ -110,9 +110,9 @@ Mutable object representing the deployment configuration:
 - `deploy_mode`: (e.g., "full", "web-caddy") - the requested deployment mode.
 - `compose_service_name`: (e.g., "web") - the specific service being processed.
 - `deploy_role`: (e.g., "app", "caddy", "other") - the role in the deployment.
-- `app_image`, `caddy_image`, `other_image`
-- `app_cpu`, `app_memory`, etc.
 - `app_port`: (int) The principal application port.
 - `app_ports`: (list[int]) All ports exposed by the application container.
+- `service_mode`: (str) Deployment mode (e.g., "app", "sidecar", "worker").
+- `ftp_passive_range`: (str) FTP passive port range if applicable (e.g., "30000-30009").
 - `web_command`: list of strings for the application entrypoint.
 - `extra_metadata`: A dictionary for custom data.

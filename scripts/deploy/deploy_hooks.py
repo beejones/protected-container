@@ -66,6 +66,10 @@ class DeployPlan:
     app_ports: list[int] = field(default_factory=list) # Additional ports if any
     web_command: list[str] | None = None
     
+    # Deployment Metadata
+    service_mode: str = "app"  # e.g. "app", "sidecar", "worker"
+    ftp_passive_range: str | None = None # e.g. "30000-30009"
+    
     # Extra bag for future expansion or downstream-specific data
     extra_metadata: dict[str, Any] = field(default_factory=dict)
 
