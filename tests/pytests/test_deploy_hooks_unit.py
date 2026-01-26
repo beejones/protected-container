@@ -88,7 +88,7 @@ def test_env_mutability_syncs_back():
     del os.environ["UNIT_TEST_INJECT"]
 
 def test_load_hooks_by_file_path(tmp_path, repo_root):
-    # Test loading from an arbitrary path (outside normal module resolution)
+    # ... (unchanged) ...
     custom_dir = tmp_path / "custom"
     custom_dir.mkdir()
     custom_file = custom_dir / "myhooks.py"
@@ -99,3 +99,25 @@ def test_load_hooks_by_file_path(tmp_path, repo_root):
     ctx.env = {}
     hooks.call("pre_validate_env", ctx)
     assert ctx.env.get("PATH_LOADED") is True
+
+def test_load_hooks_soft_fail_on_import_error(repo_root):
+    # Create default file with syntax error
+    custom_file = repo_root / "scripts" / "deploy" / "deploy_customizations.py"
+    custom_file.write_text("invalid python code")
+    
+    # With soft_fail=True, it should NOT raise ImportError but return no-op hooks
+    hooks = deploy_hooks.load_hooks(repo_root, soft_fail=True)
+    assert hooks._impl is None
+    assert hooks._soft_fail is True
+
+def test_deploy_plan_app_ports():
+    plan = deploy_hooks.DeployPlan(
+        name="test", location="loc", dns_label="dns",
+        deploy_mode="full", compose_service_name="app", deploy_role="app",
+        app_image="img", caddy_image="caddy", other_image=None,
+        app_cpu=1.0, app_memory=1.0, caddy_cpu=1.0, caddy_memory=1.0,
+        other_cpu=1.0, other_memory=1.0,
+        public_domain="dom.com", app_port=80, app_ports=[80, 8080]
+    )
+    assert plan.app_port == 80
+    assert plan.app_ports == [80, 8080]

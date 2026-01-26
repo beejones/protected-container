@@ -62,7 +62,8 @@ class DeployPlan:
     public_domain: str
     
     # Ports/Command
-    app_port: int
+    app_port: int  # Principal application port
+    app_ports: list[int] = field(default_factory=list) # Additional ports if any
     web_command: list[str] | None = None
     
     # Extra bag for future expansion or downstream-specific data
@@ -171,6 +172,11 @@ def load_hooks(repo_root: Path, module_path: str | None = None, soft_fail: bool 
         return DeployHooks(hooks_impl, soft_fail=soft_fail)
 
     except Exception as e:
+        # If soft_fail is enabled, log the loader failure and return no hooks
+        if soft_fail:
+             print(f"⚠️  [hooks] Failed to load hooks from {target_path}: {e} (soft-fail enabled)", file=sys.stderr)
+             return DeployHooks(None, soft_fail=soft_fail)
+             
         # If successfully resolved but failed to import, it's a hard error
         # regardless of whether it was requested or default.
         raise ImportError(f"Failed to load hooks from {target_path}: {e}")

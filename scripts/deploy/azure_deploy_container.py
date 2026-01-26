@@ -1134,6 +1134,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         other_cpu=other_cpu_cores,
         other_memory=other_memory_gb,
         app_port=config_app_port,
+        app_ports=compose_helpers.get_ports(services[app_service_name]) if app_service_name in services else [],
         web_command=compose_helpers.get_command(services[app_service_name]) if app_service_name in services else None,
         public_domain=public_domain,
         )

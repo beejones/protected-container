@@ -30,6 +30,9 @@ By default, hook failures abort the deployment. You can enable "soft-fail" mode 
 2. **Environment Variable**: `DEPLOY_HOOKS_SOFT_FAIL=true`
 3. **Default**: `false`
 
+> [!NOTE]
+> When `soft-fail` is enabled, it also covers **loading failures**. If a hook module exists but fails to import, the loader will log a warning and return a dummy hooks object (no-op) instead of raising an error.
+
 ## Implementing Hooks
 
 Create a Python module that exports a `get_hooks()` function returning an object (class instance or simple object) that implements any of the methods defined in the protocol. You only need to implement the hooks you care about.
@@ -109,5 +112,7 @@ Mutable object representing the deployment configuration:
 - `deploy_role`: (e.g., "app", "caddy", "other") - the role in the deployment.
 - `app_image`, `caddy_image`, `other_image`
 - `app_cpu`, `app_memory`, etc.
+- `app_port`: (int) The principal application port.
+- `app_ports`: (list[int]) All ports exposed by the application container.
 - `web_command`: list of strings for the application entrypoint.
 - `extra_metadata`: A dictionary for custom data.
