@@ -395,12 +395,14 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
     # scripts/deploy/azure_deploy_container.py -> repo root is 2 parents up.
     repo_root = repo_root_override or Path(__file__).resolve().parents[2]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
 
     # Initialize hooks early
     hooks = deploy_hooks.load_hooks(repo_root, args.hooks_module, soft_fail=args.hooks_soft_fail)
     ctx = deploy_hooks.DeployContext(
         repo_root=repo_root,
-        env=dict(os.environ),
+        env=os.environ,
         args=args,
     )
 

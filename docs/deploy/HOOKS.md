@@ -20,9 +20,9 @@ The hook loader follows this order of precedence for configuration:
 3. **Default**: `scripts/deploy/deploy_customizations.py` (relative to repo root)
 
 > [!IMPORTANT]
-> - If an explicit module is provided (via CLI or Env) and it cannot be loaded, the deployment will **hard fail**.
-> - In the default case, if the file exists but contains syntax errors or fails to import, it will **hard fail**.
-> - If the default file does not exist, hooks are silently disabled (no-op).
+> - If an explicit module or path is provided and it cannot be loaded, the deployment will **hard fail**.
+> - If the default file `scripts/deploy/deploy_customizations.py` exists but fails to import (e.g., due to syntax errors), the deployment will **hard fail**.
+> - Hooks are only skipped (no-op) if the default file is missing and no module was specified.
 
 ### Soft Fail Precedence
 By default, hook failures abort the deployment. You can enable "soft-fail" mode (log error and continue):
@@ -37,13 +37,15 @@ Create a Python module that exports a `get_hooks()` function returning an object
 ### Example `deploy_customizations.py`
 
 ```python
-import sys
+import os
 from scripts.deploy.deploy_hooks import DeployContext, DeployPlan
 
 class MyHooks:
     def pre_validate_env(self, ctx: DeployContext) -> None:
         """Called before .env files are validated. Good for injecting defaults."""
-        if not ctx.env.get("MY_CUSTOM_VAR"):
+        # ctx.env is a live view of os.environ.
+        # Modifying it here affects subsequent validation and deployment.
+        if "MY_CUSTOM_VAR" not in ctx.env:
              print("Injecting default for MY_CUSTOM_VAR")
              ctx.env["MY_CUSTOM_VAR"] = "default-value"
 

@@ -74,15 +74,16 @@ def test_load_hooks_soft_fail_precedence(repo_root, monkeypatch):
 
 def test_env_mutability_syncs_back():
     import os
-    ctx = deploy_hooks.DeployContext(repo_root=Path("."), env=dict(os.environ), args=MagicMock())
+    # We now pass os.environ directly to DeployContext.
+    # It behaves like a MutableMapping.
+    ctx = deploy_hooks.DeployContext(repo_root=Path("."), env=os.environ, args=MagicMock())
     
     # Hook modifies ctx.env
     ctx.env["UNIT_TEST_INJECT"] = "target-value"
     
-    # In azure_deploy_container.py we do:
-    os.environ.update(ctx.env)
-    
+    # Verify it is immediate in os.environ
     assert os.environ["UNIT_TEST_INJECT"] == "target-value"
+    
     # Cleanup
     del os.environ["UNIT_TEST_INJECT"]
 

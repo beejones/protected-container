@@ -13,7 +13,7 @@ try:
 except ImportError:
     from env_schema import VarsEnum
 
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable, MutableMapping
 
 logger = logging.getLogger("deploy_hooks")
 
@@ -25,7 +25,7 @@ class DeployContext:
     to inject defaults before strict validation.
     """
     repo_root: Path
-    env: dict[str, str]  # Merged runtime + deploy env
+    env: MutableMapping[str, str]  # Merged runtime + deploy env
     args: argparse.Namespace
     # We might add compose_defaults here later if needed
     
