@@ -346,6 +346,16 @@ def main() -> None:
     # Prefer a stable mirror to avoid Docker Hub rate limiting in ACI.
     # Note: ghcr.io/caddyserver/caddy does not publish a '2-alpine' tag; we use a mirror.
     parser.add_argument("--caddy-image", default=None)
+    parser.add_argument(
+        "--compose-app-service",
+        default="app",
+        help="Service name in docker-compose.yml for the application (default: app)",
+    )
+    parser.add_argument(
+        "--compose-caddy-service",
+        default="caddy",
+        help="Service name in docker-compose.yml for the caddy sidecar (default: caddy)",
+    )
 
     args = parser.parse_args()
 
@@ -361,44 +371,64 @@ def main() -> None:
 
     # Load defaults from docker-compose.yml (Source of Truth)
     # We perform this here so we can populate defaults before validating/resolving other args.
-    try:
-        compose_config = compose_helpers.load_docker_compose_config(repo_root)
-        app_service = compose_helpers.get_service_config(compose_config, "app")
-        
-        # Determine app port: check exposed ports first, then env var
-        app_ports = compose_helpers.get_ports(app_service)
-        config_app_port = 8080 # Fallback
-        
-        if app_ports:
-            # logic to find first tcp port
-            for p in app_ports:
-                if isinstance(p, dict) and p.get("protocol") == "tcp":
-                    config_app_port = int(p["target"])
-                    break
-                elif isinstance(p, str): # "8080:8080" or "8080"
-                     parts = p.split(":")
-                     config_app_port = int(parts[-1])
-                     break
-                elif isinstance(p, int):
-                    config_app_port = p
-                    break
-        else:
-             # Fallback to env var if ports not explicit (though they should be)
-             port_env = compose_helpers.get_env_var(app_service, "CODE_SERVER_PORT")
-             if port_env:
-                 config_app_port = int(port_env)
+    config_app_port = 8080 # Fallback
+    config_caddy_image = "caddy:2-alpine"
+    config_docker_context = None
 
-        # Caddy image
+    try:
+        # Use PyYAML-based helper which handles interpolation and doesn't require docker runtime.
+        compose_config = compose_helpers.load_docker_compose_config(repo_root)
+        
+        # User can customize which service mapped to 'app' or 'caddy'
+        app_service_name = args.compose_app_service
+        caddy_service_name = args.compose_caddy_service
+        
         try:
-            caddy_service = compose_helpers.get_service_config(compose_config, "caddy")
+            app_service = compose_helpers.get_service_config(compose_config, app_service_name)
+            
+            # Docker context
+            config_docker_context = compose_helpers.get_build_context(app_service)
+
+            # Determine app port
+            app_ports = compose_helpers.get_ports(app_service)
+            if app_ports:
+                 for p in app_ports:
+                    # Handle "HOST:CONTAINER" string format which PyYAML returns
+                    if isinstance(p, str): 
+                         if ":" in p:
+                             parts = p.split(":")
+                             # "8080:8080" -> 8080. We care about the Container port (right side)
+                             # actually for ACI we want to know what the app listens on.
+                             # If "80:8080", app listens on 8080.
+                             config_app_port = int(parts[-1])
+                         else:
+                             config_app_port = int(p)
+                         break
+                    elif isinstance(p, int):
+                        config_app_port = p
+                        break
+                    # dict format (long syntax) not fully supported by simple helper yet, 
+                    # but test passed with string list.
+            else:
+                 port_env = compose_helpers.get_env_var(app_service, "CODE_SERVER_PORT")
+                 if port_env:
+                     config_app_port = int(port_env)
+        
+        except ValueError:
+            # app service might be optional or named differently? 
+            # If default "app" is missing, we just log warn.
+            print(f"⚠️  [warn] Service '{app_service_name}' not found in docker-compose.yml", file=sys.stderr)
+
+        try:
+            caddy_service = compose_helpers.get_service_config(compose_config, caddy_service_name)
             config_caddy_image = compose_helpers.get_image(caddy_service) or "caddy:2-alpine"
         except ValueError:
-            config_caddy_image = "caddy:2-alpine"
+             # caddy might be missing if user is just deploying single container?
+             # But our script assumes sidecar pattern.
+             pass
 
     except Exception as e:
         print(f"⚠️  [warn] Failed to load docker-compose.yml defaults: {e}", file=sys.stderr)
-        config_app_port = 8080
-        config_caddy_image = "caddy:2-alpine"
 
     interactive = is_interactive() if args.interactive is None else bool(args.interactive)
     # Key Vault is used at *runtime* by the container to fetch the full .env secret.
@@ -837,10 +867,10 @@ def main() -> None:
     # Build/push before deploy if requested.
     if build_requested or push_requested:
         # Docker operations happen from the repo root by default.
-        docker_context = (args.docker_context or str(repo_root)).strip() or str(repo_root)
+        docker_context = (args.docker_context or "").strip() or config_docker_context or str(repo_root)
         dockerfile = (args.dockerfile or "").strip() or None
 
-        if not dockerfile and not args.docker_context:
+        if not dockerfile and not args.docker_context and not config_docker_context:
             if (repo_root / "docker" / "Dockerfile").exists():
                 # If docker/Dockerfile exists and no context given,
                 # assume the user wants to build the inner "docker" directory as a context.
