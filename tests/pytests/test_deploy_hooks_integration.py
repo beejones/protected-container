@@ -90,7 +90,7 @@ def test_deploy_hooks_flow(mock_hooks_module, monkeypatch, tmp_path, capsys):
 
     # Create dummy .env files
     (tmp_path / ".env.deploy").write_text("AZURE_RESOURCE_GROUP=rg\nAZURE_LOCATION=loc\nPUBLIC_DOMAIN=dom.com\nACME_EMAIL=me@test.com\nAPP_IMAGE=nginx:latest\n")
-    (tmp_path / ".env").write_text("BASIC_AUTH_HASH=$2b$14$dummyhash\nSOME_VAR=val")
+    (tmp_path / ".env").write_text("BASIC_AUTH_HASH=$2b$14$dummyhash")
 
     # Patch sys.argv
     test_args = [
@@ -115,7 +115,7 @@ def test_deploy_hooks_flow(mock_hooks_module, monkeypatch, tmp_path, capsys):
             mock_file.name = str(tmp_path / "deploy.yaml")
             
             # Run main
-            azure_deploy_container.main()
+            azure_deploy_container.main(argv=test_args[1:], repo_root_override=tmp_path)
             
             # Verify YAML content was written
             args, _ = mock_file.write.call_args
@@ -147,7 +147,7 @@ def test_deploy_hooks_flow(mock_hooks_module, monkeypatch, tmp_path, capsys):
                 mock_temp.return_value.__enter__.return_value = mock_file
                 mock_file.name = str(tmp_path / "deploy.yaml")
                 
-                azure_deploy_container.main()
+                azure_deploy_container.main(argv=test_args_valid[1:], repo_root_override=tmp_path)
     except SystemExit as e:
         if e.code != 0:
             # Re-read capsys in case it was used

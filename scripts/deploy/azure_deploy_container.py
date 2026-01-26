@@ -170,7 +170,7 @@ def generate_deploy_yaml(
     )
 
 
-def main() -> None:
+def main(argv: list[str] | None = None, repo_root_override: Path | None = None) -> None:
     parser = argparse.ArgumentParser(description="Deploy protected-azure-container to Azure Container Instances")
 
     # These can come from --env-file (recommended) so they are not required.
@@ -391,10 +391,10 @@ def main() -> None:
         help="Do not abort deployment if a hook fails (default: fail on error)",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     # scripts/deploy/azure_deploy_container.py -> repo root is 2 parents up.
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = repo_root_override or Path(__file__).resolve().parents[2]
 
     # Initialize hooks early
     hooks = deploy_hooks.load_hooks(repo_root, args.hooks_module, soft_fail=args.hooks_soft_fail)
@@ -1230,4 +1230,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
