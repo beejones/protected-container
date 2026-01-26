@@ -67,7 +67,7 @@ def generate_deploy_yaml(
             "  }",
             "",
             "  # Proxy to code-server",
-            f"  reverse_proxy http://localhost:{app_port} {{",
+            f"  reverse_proxy http://127.0.0.1:{app_port} {{",
             "    header_up Upgrade {http.request.header.Upgrade}",
             "    header_up Connection {http.request.header.Connection}",
             "  }",
