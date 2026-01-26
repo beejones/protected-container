@@ -413,8 +413,10 @@ def main() -> None:
 
                 app_service = services[app_service_name]
                 
-                # Docker context
-                config_docker_context = compose_helpers.get_build_context(app_service)
+                # Docker context: Resolve relative to repo_root
+                raw_context = compose_helpers.get_build_context(app_service)
+                if raw_context:
+                    config_docker_context = str((repo_root / raw_context).resolve())
 
                 # Determine app port
                 app_ports = compose_helpers.get_ports(app_service)
@@ -431,6 +433,12 @@ def main() -> None:
                         elif isinstance(p, int):
                             config_app_port = p
                             break
+                        elif isinstance(p, dict):
+                            # Handle long syntax: ports: [{ target: 8080, published: 80, ... }]
+                            # We want the container port (target)
+                            if "target" in p:
+                                config_app_port = int(p["target"])
+                                break
                 else:
                      port_env = compose_helpers.get_env_var(app_service, "CODE_SERVER_PORT")
                      if port_env:

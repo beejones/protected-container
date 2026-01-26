@@ -79,6 +79,10 @@ def test_get_ports(mock_compose_file):
     app = compose_helpers.get_service_config(config, "app")
     ports = compose_helpers.get_ports(app)
     assert "8080:8080" in ports or "8080:8080" == ports[0]
+    
+    # Test dict format (long syntax)
+    service_config = {"ports": [{"target": 8080, "published": 443}]}
+    assert compose_helpers.get_ports(service_config) == [{"target": 8080, "published": 443}]
 
 def test_get_build_context(mock_compose_file):
     config = compose_helpers.load_docker_compose_config(mock_compose_file)
