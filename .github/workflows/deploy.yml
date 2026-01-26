@@ -270,7 +270,7 @@ jobs:
           echo "AZURE_LOCATION=${{ inputs.location }}"
           echo "AZURE_CONTAINER_NAME=${{ vars.AZURE_CONTAINER_NAME || 'protected-azure-container' }}"
           echo ""
-          echo "CONTAINER_IMAGE=ghcr.io/${{ github.repository }}:latest"
+          echo "APP_IMAGE=ghcr.io/${{ github.repository }}:latest"
           echo ""
           echo "PUBLIC_DOMAIN=${{ vars.PUBLIC_DOMAIN }}"
           echo "ACME_EMAIL=${{ vars.ACME_EMAIL }}"
