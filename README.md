@@ -35,28 +35,25 @@ Two containers in a container group (configuration derived from `docker-compose.
 |-----------|---------|-------|
 | `protected-azure-container` | code-server (VS Code) | Matches `docker-compose.yml` (default 8080) |
 | `tls-proxy` (Caddy) | TLS termination + Basic Auth | 80, 443 |
+| `other` (Optional) | Generic additional service | Matches `docker-compose.yml` role |
 
 ```
 Internet → Caddy (443) → [Basic Auth] → code-server (app_port)
-```
-
-```
-Internet → Caddy (443) → [Basic Auth] → code-server (app_port)
+                                      ↘ other (optional)
 ```
 
 ## Docker Compose as Source of Truth
 
-The deployment scripts (`scripts/deploy/`) are designed to read your repository's `docker-compose.yml` file to derive key configuration values. This ensures that your local development environment and your Azure production deployment stay in sync.
+The deployment scripts (`scripts/deploy/`) are designed to read your repository's `docker-compose.yml` file to derive key configuration values. This creates a clear contract using `x-deploy-role`:
 
-### Service Discovery via `x-deploy-role`
+1. **App Service**: `x-deploy-role: app`
+    - Main application (code-server).
 
-The deploy script discovers which service is which by looking for the `x-deploy-role` extension field in `docker-compose.yml`. This creates a clear, explicit contract that doesn't rely on guessing names.
+2. **Sidecar Service**: `x-deploy-role: sidecar`
+    - Caddy / TLS termination.
 
-1. **App Service**: Must have `x-deploy-role: app`
-    - The script uses this service to determine the port and build context.
-
-2. **Sidecar Service**: Must have `x-deploy-role: sidecar`
-    - The script uses this service to identify the image to deploy as the TLS proxy.
+3. **Other Service**: (Optional) Service with no special role or explicit `x-deploy-role: other` (implicit).
+    - Deployed as a generic sidecar container sharing the workspace volume.
 
 **Example:**
 
