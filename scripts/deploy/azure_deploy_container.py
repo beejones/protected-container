@@ -33,6 +33,7 @@ sys.path.append(str(Path(__file__).parent))
 
 import azure_deploy_container_helpers as deploy_helpers
 import azure_deploy_yaml_helpers as yaml_helpers
+import docker_compose_helpers as compose_helpers
 
 from env_schema import (
     DEPLOY_SCHEMA,
@@ -126,6 +127,7 @@ def generate_deploy_yaml(
     caddy_data_share_name: str,
     caddy_config_share_name: str,
     caddy_image: str,
+    app_port: int = 8080,
 ) -> str:
     """Back-compat re-export for tests and external callers."""
 
@@ -153,6 +155,7 @@ def generate_deploy_yaml(
         caddy_data_share_name=caddy_data_share_name,
         caddy_config_share_name=caddy_config_share_name,
         caddy_image=caddy_image,
+        app_port=app_port,
     )
 
 
@@ -342,7 +345,17 @@ def main() -> None:
 
     # Prefer a stable mirror to avoid Docker Hub rate limiting in ACI.
     # Note: ghcr.io/caddyserver/caddy does not publish a '2-alpine' tag; we use a mirror.
-    parser.add_argument("--caddy-image", default="caddy:2-alpine")
+    parser.add_argument("--caddy-image", default=None)
+    parser.add_argument(
+        "--compose-app-service",
+        default=None,
+        help="Service name in docker-compose.yml for the application (default: auto-detect)",
+    )
+    parser.add_argument(
+        "--compose-caddy-service",
+        default=None,
+        help="Service name in docker-compose.yml for the caddy sidecar (default: auto-detect)",
+    )
 
     args = parser.parse_args()
 
@@ -355,6 +368,88 @@ def main() -> None:
 
     # scripts/deploy/azure_deploy_container.py -> repo root is 2 parents up.
     repo_root = Path(__file__).resolve().parents[2]
+
+    # Load defaults from docker-compose.yml (Source of Truth)
+    config_app_port = 8080 # Fallback
+    config_caddy_image = "caddy:2-alpine"
+    config_docker_context = None
+
+    try:
+        # Use PyYAML-based helper which handles interpolation and doesn't require docker runtime.
+        compose_config = compose_helpers.load_docker_compose_config(repo_root)
+        services = compose_config.get("services", {})
+        
+        # Service Discovery via x-deploy-role (Concept: Explicit Contract)
+        detected_app_name = None
+        detected_caddy_name = None
+
+        for name, svc in services.items():
+            role = compose_helpers.get_deploy_role(svc)
+            if role == "app":
+                detected_app_name = name
+            elif role == "sidecar":
+                detected_caddy_name = name
+
+        # 1. Resolve Sidecar Service
+        # CLI Argument > x-deploy-role > Auto-detect fallback (none)
+        caddy_service_name = args.compose_caddy_service or detected_caddy_name
+        
+        if caddy_service_name:
+            if caddy_service_name in services:
+                 caddy_service = services[caddy_service_name]
+                 config_caddy_image = compose_helpers.get_image(caddy_service) or "caddy:2-alpine"
+            else:
+                 print(f"⚠️  [warn] Targeted Caddy service '{caddy_service_name}' not found", file=sys.stderr)
+
+        # 2. Resolve App Service
+        # CLI Argument > x-deploy-role > Auto-detect fallback (none)
+        app_service_name = args.compose_app_service or detected_app_name
+
+        if app_service_name:
+            if app_service_name in services:
+                # Log success if using auto-detected from role
+                if not args.compose_app_service and detected_app_name:
+                    print(f"ℹ️  [deploy] Detected services from x-deploy-role: app='{app_service_name}', sidecar='{caddy_service_name}'")
+
+                app_service = services[app_service_name]
+                
+                # Docker context: Resolve relative to repo_root
+                raw_context = compose_helpers.get_build_context(app_service)
+                if raw_context:
+                    config_docker_context = str((repo_root / raw_context).resolve())
+
+                # Determine app port
+                app_ports = compose_helpers.get_ports(app_service)
+                if app_ports:
+                     for p in app_ports:
+                        # Handle "HOST:CONTAINER" string format which PyYAML returns
+                        if isinstance(p, str): 
+                             if ":" in p:
+                                 parts = p.split(":")
+                                 config_app_port = int(parts[-1])
+                             else:
+                                 config_app_port = int(p)
+                             break
+                        elif isinstance(p, int):
+                            config_app_port = p
+                            break
+                        elif isinstance(p, dict):
+                            # Handle long syntax: ports: [{ target: 8080, published: 80, ... }]
+                            # We want the container port (target)
+                            if "target" in p:
+                                config_app_port = int(p["target"])
+                                break
+                else:
+                     port_env = compose_helpers.get_env_var(app_service, "CODE_SERVER_PORT")
+                     if port_env:
+                         config_app_port = int(port_env)
+            else:
+                 print(f"⚠️  [warn] Targeted App service '{app_service_name}' not found", file=sys.stderr)
+        else:
+             print("⚠️  [warn] Could not detect App service. Add 'x-deploy-role: app' to docker-compose.yml or use --compose-app-service.", file=sys.stderr)
+
+    except Exception as e:
+        print(f"⚠️  [warn] Failed to load docker-compose.yml defaults: {e}", file=sys.stderr)
 
     interactive = is_interactive() if args.interactive is None else bool(args.interactive)
     # Key Vault is used at *runtime* by the container to fetch the full .env secret.
@@ -793,10 +888,10 @@ def main() -> None:
     # Build/push before deploy if requested.
     if build_requested or push_requested:
         # Docker operations happen from the repo root by default.
-        docker_context = (args.docker_context or str(repo_root)).strip() or str(repo_root)
+        docker_context = (args.docker_context or "").strip() or config_docker_context or str(repo_root)
         dockerfile = (args.dockerfile or "").strip() or None
 
-        if not dockerfile and not args.docker_context:
+        if not dockerfile and not args.docker_context and not config_docker_context:
             if (repo_root / "docker" / "Dockerfile").exists():
                 # If docker/Dockerfile exists and no context given,
                 # assume the user wants to build the inner "docker" directory as a context.
@@ -869,7 +964,7 @@ def main() -> None:
     else:
         print(f"⚠️  [deploy] Timed out waiting for container deletion after {max_wait}s, proceeding anyway...")
 
-    caddy_image = (args.caddy_image or "").strip() or "caddy:2-alpine"
+    caddy_image = (args.caddy_image or "").strip() or config_caddy_image
 
     if args.prefetch_images:
         try:
@@ -947,6 +1042,7 @@ def main() -> None:
         caddy_data_share_name=caddy_data_share,
         caddy_config_share_name=caddy_config_share,
         caddy_image=caddy_image,
+        app_port=config_app_port,
     )
 
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:

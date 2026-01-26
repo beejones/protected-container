@@ -29,16 +29,58 @@ Open `https://localhost` (accept the self-signed cert warning for local dev).
 
 ## Architecture
 
-Two containers in a container group:
+Two containers in a container group (configuration derived from `docker-compose.yml`):
 
 | Container | Purpose | Ports |
 |-----------|---------|-------|
-| `protected-azure-container` | code-server (VS Code) | 8080 (internal) |
+| `protected-azure-container` | code-server (VS Code) | Matches `docker-compose.yml` (default 8080) |
 | `tls-proxy` (Caddy) | TLS termination + Basic Auth | 80, 443 |
 
 ```
-Internet → Caddy (443) → [Basic Auth] → code-server (8080)
+Internet → Caddy (443) → [Basic Auth] → code-server (app_port)
 ```
+
+```
+Internet → Caddy (443) → [Basic Auth] → code-server (app_port)
+```
+
+## Docker Compose as Source of Truth
+
+The deployment scripts (`scripts/deploy/`) are designed to read your repository's `docker-compose.yml` file to derive key configuration values. This ensures that your local development environment and your Azure production deployment stay in sync.
+
+### Service Discovery via `x-deploy-role`
+
+The deploy script discovers which service is which by looking for the `x-deploy-role` extension field in `docker-compose.yml`. This creates a clear, explicit contract that doesn't rely on guessing names.
+
+1. **App Service**: Must have `x-deploy-role: app`
+    - The script uses this service to determine the port and build context.
+
+2. **Sidecar Service**: Must have `x-deploy-role: sidecar`
+    - The script uses this service to identify the image to deploy as the TLS proxy.
+
+**Example:**
+
+```yaml
+services:
+  my-app:
+    x-deploy-role: app
+    # ...
+  
+  caddy:
+    x-deploy-role: sidecar
+    # ...
+```
+
+If you ever need to override this detection, you can still use the CLI arguments:
+```bash
+python scripts/deploy/azure_deploy_container.py --compose-app-service my-legacy-app
+```
+
+### Precedence
+
+**CLI Arguments > Docker Compose > Defaults**
+
+Explicit arguments (e.g. `--caddy-image foo:bar`) always override values derived from `docker-compose.yml`.
 
 ## Documentation
 

@@ -10,15 +10,15 @@ Deploy **protected-azure-container** to **Azure Container Instances (ACI)** with
 
 ## Architecture
 
-ACI container group with 2 containers:
+ACI container group with 2 containers (configuration derived from `docker-compose.yml`):
 
 | Container | Purpose | Ports |
 |-----------|---------|-------|
-| `protected-azure-container` | code-server | 8080 (internal) |
+| `protected-azure-container` | code-server | Matches `docker-compose.yml` (default 8080) |
 | `tls-proxy` (Caddy) | TLS + Basic Auth | 80, 443 (public) |
 
 ```
-Internet → Caddy (:443) → [TLS + Basic Auth] → code-server (:8080)
+Internet → Caddy (:443) → [TLS + Basic Auth] → code-server (:app_port)
 ```
 
 ## Prerequisites

@@ -1,6 +1,7 @@
 services:
   # Main application container with code-server
   app:
+    x-deploy-role: app
     build:
       context: ./docker
       dockerfile: Dockerfile
@@ -23,6 +24,7 @@ services:
 
   # Caddy TLS proxy sidecar
   caddy:
+    x-deploy-role: sidecar
     image: caddy:2-alpine
     container_name: tls-proxy
     restart: unless-stopped

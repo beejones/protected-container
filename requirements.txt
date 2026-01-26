@@ -5,6 +5,7 @@ requests==2.32.5
 
 # Development dependencies
 python-dotenv==1.2.1
+PyYAML>=6.0
 
 # For generating Caddy-compatible bcrypt hashes for Basic Auth
 bcrypt>=4.2.0
