@@ -29,15 +29,15 @@ Open `https://localhost` (accept the self-signed cert warning for local dev).
 
 ## Architecture
 
-Two containers in a container group:
+Two containers in a container group (configuration derived from `docker-compose.yml`):
 
 | Container | Purpose | Ports |
 |-----------|---------|-------|
-| `protected-azure-container` | code-server (VS Code) | 8080 (internal) |
+| `protected-azure-container` | code-server (VS Code) | Matches `docker-compose.yml` (default 8080) |
 | `tls-proxy` (Caddy) | TLS termination + Basic Auth | 80, 443 |
 
 ```
-Internet → Caddy (443) → [Basic Auth] → code-server (8080)
+Internet → Caddy (443) → [Basic Auth] → code-server (app_port)
 ```
 
 ## Documentation

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 
-DEFAULT_APP_PORT = 8080
 
 TLS_CPU_CORES = 0.25
 TLS_MEMORY_GB = 0.25
@@ -40,6 +39,7 @@ def generate_deploy_yaml(
     caddy_data_share_name: str,
     caddy_config_share_name: str,
     caddy_image: str,
+    app_port: int,
 ) -> str:
     app_memory_gb = normalize_aci_memory_gb(memory_gb)
     tls_memory_gb = normalize_aci_memory_gb(TLS_MEMORY_GB)
@@ -67,7 +67,7 @@ def generate_deploy_yaml(
             "  }",
             "",
             "  # Proxy to code-server",
-            "  reverse_proxy http://localhost:8080 {",
+            f"  reverse_proxy http://localhost:{app_port} {{",
             "    header_up Upgrade {http.request.header.Upgrade}",
             "    header_up Connection {http.request.header.Connection}",
             "  }",
@@ -107,7 +107,7 @@ def generate_deploy_yaml(
         indent(6, "properties:"),
         indent(8, f"image: {image}"),
         indent(8, "ports:"),
-        indent(10, f"- port: {DEFAULT_APP_PORT}"),  # 8080 for code-server
+        indent(10, f"- port: {app_port}"),  # Main application port
         indent(12, "protocol: TCP"),
         indent(8, "resources:"),
         indent(10, "requests:"),
@@ -115,7 +115,7 @@ def generate_deploy_yaml(
         indent(12, f"memoryInGB: {app_memory_gb}"),
         indent(8, "environmentVariables:"),
         indent(10, "- name: CODE_SERVER_PORT"),
-        indent(12, "value: '8080'"),
+        indent(12, f"value: '{app_port}'"),
         indent(10, "- name: AZURE_KEYVAULT_URI"),
         indent(12, f"value: 'https://{kv_name}.vault.azure.net/'"),
     ]

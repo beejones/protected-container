@@ -33,6 +33,7 @@ sys.path.append(str(Path(__file__).parent))
 
 import azure_deploy_container_helpers as deploy_helpers
 import azure_deploy_yaml_helpers as yaml_helpers
+import docker_compose_helpers as compose_helpers
 
 from env_schema import (
     DEPLOY_SCHEMA,
@@ -126,6 +127,7 @@ def generate_deploy_yaml(
     caddy_data_share_name: str,
     caddy_config_share_name: str,
     caddy_image: str,
+    app_port: int = 8080,
 ) -> str:
     """Back-compat re-export for tests and external callers."""
 
@@ -153,6 +155,7 @@ def generate_deploy_yaml(
         caddy_data_share_name=caddy_data_share_name,
         caddy_config_share_name=caddy_config_share_name,
         caddy_image=caddy_image,
+        app_port=app_port,
     )
 
 
@@ -342,7 +345,7 @@ def main() -> None:
 
     # Prefer a stable mirror to avoid Docker Hub rate limiting in ACI.
     # Note: ghcr.io/caddyserver/caddy does not publish a '2-alpine' tag; we use a mirror.
-    parser.add_argument("--caddy-image", default="caddy:2-alpine")
+    parser.add_argument("--caddy-image", default=None)
 
     args = parser.parse_args()
 
@@ -355,6 +358,47 @@ def main() -> None:
 
     # scripts/deploy/azure_deploy_container.py -> repo root is 2 parents up.
     repo_root = Path(__file__).resolve().parents[2]
+
+    # Load defaults from docker-compose.yml (Source of Truth)
+    # We perform this here so we can populate defaults before validating/resolving other args.
+    try:
+        compose_config = compose_helpers.load_docker_compose_config(repo_root)
+        app_service = compose_helpers.get_service_config(compose_config, "app")
+        
+        # Determine app port: check exposed ports first, then env var
+        app_ports = compose_helpers.get_ports(app_service)
+        config_app_port = 8080 # Fallback
+        
+        if app_ports:
+            # logic to find first tcp port
+            for p in app_ports:
+                if isinstance(p, dict) and p.get("protocol") == "tcp":
+                    config_app_port = int(p["target"])
+                    break
+                elif isinstance(p, str): # "8080:8080" or "8080"
+                     parts = p.split(":")
+                     config_app_port = int(parts[-1])
+                     break
+                elif isinstance(p, int):
+                    config_app_port = p
+                    break
+        else:
+             # Fallback to env var if ports not explicit (though they should be)
+             port_env = compose_helpers.get_env_var(app_service, "CODE_SERVER_PORT")
+             if port_env:
+                 config_app_port = int(port_env)
+
+        # Caddy image
+        try:
+            caddy_service = compose_helpers.get_service_config(compose_config, "caddy")
+            config_caddy_image = compose_helpers.get_image(caddy_service) or "caddy:2-alpine"
+        except ValueError:
+            config_caddy_image = "caddy:2-alpine"
+
+    except Exception as e:
+        print(f"⚠️  [warn] Failed to load docker-compose.yml defaults: {e}", file=sys.stderr)
+        config_app_port = 8080
+        config_caddy_image = "caddy:2-alpine"
 
     interactive = is_interactive() if args.interactive is None else bool(args.interactive)
     # Key Vault is used at *runtime* by the container to fetch the full .env secret.
@@ -869,7 +913,7 @@ def main() -> None:
     else:
         print(f"⚠️  [deploy] Timed out waiting for container deletion after {max_wait}s, proceeding anyway...")
 
-    caddy_image = (args.caddy_image or "").strip() or "caddy:2-alpine"
+    caddy_image = (args.caddy_image or "").strip() or config_caddy_image
 
     if args.prefetch_images:
         try:
@@ -947,6 +991,7 @@ def main() -> None:
         caddy_data_share_name=caddy_data_share,
         caddy_config_share_name=caddy_config_share,
         caddy_image=caddy_image,
+        app_port=config_app_port,
     )
 
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
