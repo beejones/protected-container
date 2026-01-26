@@ -21,6 +21,11 @@ class HookRecorder:
 
     def build_deploy_plan(self, ctx, plan):
         self.log.append("build_deploy_plan")
+        # Verify metadata exists
+        assert plan.deploy_mode == "full"
+        assert plan.deploy_role == "app"
+        assert plan.compose_service_name == "app"
+        
         plan.extra_metadata["tested"] = True
         plan.app_cpu = 9.9  # Override
 
@@ -36,6 +41,9 @@ class HookRecorder:
 
     def post_deploy(self, ctx, plan, result):
         self.log.append("post_deploy")
+
+    def on_error(self, ctx, exc):
+        self.log.append(f"on_error: {type(exc).__name__}")
 
 
 @pytest.fixture

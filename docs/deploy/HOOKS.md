@@ -13,20 +13,22 @@ Hooks are Python callback methods that run at specific points in the deployment 
 
 ## Configuration
 
-To enable hooks, set the `DEPLOY_HOOKS_MODULE` environment variable (or use the CLI argument) to point to your Python module:
+### Loader Precedence
+The hook loader follows this order of precedence for configuration:
+1. **CLI Argument**: `--hooks-module <path>`
+2. **Environment Variable**: `DEPLOY_HOOKS_MODULE=<path>`
+3. **Default**: `scripts/deploy/deploy_customizations.py` (relative to repo root)
 
-**Environment Variable:**
-```bash
-export DEPLOY_HOOKS_MODULE=scripts.deploy.deploy_customizations
-```
+> [!IMPORTANT]
+> - If an explicit module is provided (via CLI or Env) and it cannot be loaded, the deployment will **hard fail**.
+> - In the default case, if the file exists but contains syntax errors or fails to import, it will **hard fail**.
+> - If the default file does not exist, hooks are silently disabled (no-op).
 
-**CLI Argument:**
-```bash
-./scripts/deploy/azure_deploy_container.py --hooks-module scripts.deploy.deploy_customizations
-```
-
-**Default:**
-If `scripts/deploy/deploy_customizations.py` exists, it will be loaded automatically.
+### Soft Fail Precedence
+By default, hook failures abort the deployment. You can enable "soft-fail" mode (log error and continue):
+1. **CLI Argument**: `--hooks-soft-fail`
+2. **Environment Variable**: `DEPLOY_HOOKS_SOFT_FAIL=true`
+3. **Default**: `false`
 
 ## Implementing Hooks
 
@@ -47,20 +49,14 @@ class MyHooks:
 
     def build_deploy_plan(self, ctx: DeployContext, plan: DeployPlan) -> None:
         """Called before YAML generation. Modify the plan here."""
-        # Example: Enforce a specific image tag in production
-        if ctx.env.get("ENVIRONMENT") == "production":
-             plan.app_image = "my-prod-image:stable"
-             
-        # Example: Increase resources
-        plan.app_memory = 4.0
+        # Use plan metadata to decide behavior
+        if plan.deploy_mode == "full" and plan.deploy_role == "app":
+             plan.app_cpu = 4.0
+             plan.web_command = ["./start-custom.sh"]
 
     def post_render_yaml(self, ctx: DeployContext, plan: DeployPlan, yaml_text: str) -> str:
         """Called after YAML generation. Return modified YAML."""
-        # Example: Add a custom environment variable to the YAML text
-        return yaml_text.replace(
-            "name: PUBLIC_DOMAIN", 
-            "name: PUBLIC_DOMAIN\n        - name: EXTRA_VAR\n          value: 'foo'"
-        )
+        return yaml_text + "\n# Patched by custom hook"
 
 def get_hooks():
     return MyHooks()
@@ -69,59 +65,47 @@ def get_hooks():
 ## Hook Reference
 
 ### `pre_validate_env(ctx)`
-- **When**: Before strict schema validation of `.env` files.
-- **Use for**: Injecting default environment variables, checking external prerequisites.
+- **Summary**: Called before strict schema validation and before `.env` files are loaded.
+- **Environment Mutability**: `ctx.env` is a mutable mapping. Changes made here are synchronized back to `os.environ` and are visible to the subsequent validation steps.
 
 ### `post_validate_env(ctx)`
-- **When**: After environment variables are loaded and validated.
+- **Summary**: After environment variables are loaded and validated.
 - **Use for**: Enforcing cross-field validation rules specific to your deployment.
 
 ### `build_deploy_plan(ctx, plan)`
-- **When**: After parsing arguments and Docker Compose defaults, but before generating YAML.
-- **Use for**: Overriding images, resources, ports, or networking settings. This is the **preferred** place for most customizations.
+- **Summary**: After parsing arguments and Docker Compose defaults, but before generating YAML.
+- **Use for**: Overriding images, resources, ports, or command. This is the **preferred** place for most customizations.
 
 ### `pre_render_yaml(ctx, plan)`
-- **When**: Just before the YAML generation function is called.
-- **Use for**: Last-minute plan adjustments.
+- **Summary**: Just before the YAML generation function is called.
 
 ### `post_render_yaml(ctx, plan, yaml_text) -> str`
-- **When**: After YAML generation.
-- **Use for**: String-based patching of result YAML if the `DeployPlan` doesn't expose a specific ACI feature you need.
+- **Summary**: After YAML generation.
+- **Use for**: String-based patching of result YAML.
 
 ### `pre_az_apply(ctx, plan, yaml_path)`
-- **When**: Before `az container create` is executed.
-- **Use for**: Logging, final confirmation, or side-effects (e.g. creating other resources).
+- **Summary**: Before `az container create` is executed.
 
 ### `post_deploy(ctx, plan, deploy_result)`
-- **When**: After successful deployment.
-- **Use for**: Post-deploy notifications, health checks.
+- **Summary**: After successful deployment.
 
 ### `on_error(ctx, exc)`
-- **When**: If an exception occurs during deployment.
-- **Use for**: Custom error reporting.
+- **Summary**: If an exception occurs during the deployment lifecycle.
+- **Note**: This catch includes deployment runtime exceptions but excludes `SystemExit` (e.g. from argparse or direct validation skips).
 
 ## Data Structures
 
 ### `DeployContext`
-Read-only context containing:
 - `repo_root`: Path to repository root.
-- `env`: Dictionary of current environment variables.
+- `env`: Mutable mapping of current environment variables.
 - `args`: Parsed command-line arguments.
 
 ### `DeployPlan`
 Mutable object representing the deployment configuration:
-- `name`, `location`, `dns_label`
+- `deploy_mode`: (e.g., "full", "web-caddy") - the requested deployment mode.
+- `compose_service_name`: (e.g., "web") - the specific service being processed.
+- `deploy_role`: (e.g., "app", "caddy", "other") - the role in the deployment.
 - `app_image`, `caddy_image`, `other_image`
 - `app_cpu`, `app_memory`, etc.
+- `web_command`: list of strings for the application entrypoint.
 - `extra_metadata`: A dictionary for custom data.
-
-## Error Handling
-
-By default, if a hook raises an exception, the deployment aborts.
-To allow the deployment to continue despite hook failures (soft fail), set:
-
-```bash
-export DEPLOY_HOOKS_SOFT_FAIL=true
-# or
-./scripts/deploy/azure_deploy_container.py --hooks-soft-fail
-```

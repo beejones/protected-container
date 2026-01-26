@@ -19,7 +19,11 @@ logger = logging.getLogger("deploy_hooks")
 
 @dataclass
 class DeployContext:
-    """Read-only context passed to hooks."""
+    """Read-only context passed to hooks.
+    
+    NOTE: 'env' is a reference to a dictionary. Hooks can modify it (e.g. in pre_validate_env)
+    to inject defaults before strict validation.
+    """
     repo_root: Path
     env: dict[str, str]  # Merged runtime + deploy env
     args: argparse.Namespace
@@ -36,6 +40,11 @@ class DeployPlan:
     location: str
     dns_label: str
     
+    # Terminology refinements
+    deploy_mode: str # e.g. "full", "web-caddy", "ftp"
+    compose_service_name: str # e.g. "web", "ftp", "caddy"
+    deploy_role: str # e.g. "app", "caddy", "other"
+    
     # Image references
     app_image: str
     caddy_image: str
@@ -49,11 +58,12 @@ class DeployPlan:
     other_cpu: float
     other_memory: float
     
-    # Ports
-    app_port: int
-    
     # Networking
     public_domain: str
+    
+    # Ports/Command
+    app_port: int
+    web_command: list[str] | None = None
     
     # Extra bag for future expansion or downstream-specific data
     extra_metadata: dict[str, Any] = field(default_factory=dict)
@@ -87,10 +97,6 @@ class DeployHooks:
             # Hook not implemented, no-op
             return None
         
-        # If the hook is expected to return something (like post_render_yaml),
-        # we need to be careful. For now, we assume the caller handles the return value
-        # or passes mutable objects.
-        
         try:
             return method(*args, **kwargs)
         except Exception as e:
@@ -101,13 +107,19 @@ class DeployHooks:
                 print(f"❌ [hook] Hook '{hook_name}' failed: {e}", file=sys.stderr)
                 raise
 
-def load_hooks(module_path: str | None = None) -> DeployHooks:
+def load_hooks(repo_root: Path, module_path: str | None = None, soft_fail: bool | None = None) -> DeployHooks:
     """Load hooks from a module.
     
     Resolution order:
     1. CLI argument/Env var (if provided) -> Must exist or error.
     2. Default 'scripts/deploy/deploy_customizations.py' -> If exists, load. Else no-op.
+    
+    Default case uses file-path loading to avoid PYTHONPATH issues.
     """
+    
+    # Soft fail config: CLI arg > Env Var > Default False
+    if soft_fail is None:
+        soft_fail = os.getenv(VarsEnum.DEPLOY_HOOKS_SOFT_FAIL.value, "").lower() == "true"
     
     # Determine target module path
     target_path = module_path
@@ -118,33 +130,25 @@ def load_hooks(module_path: str | None = None) -> DeployHooks:
         target_path = os.getenv(VarsEnum.DEPLOY_HOOKS_MODULE.value)
     
     if not target_path:
-        # Check default path
-        default_file = Path("scripts/deploy/deploy_customizations.py")
+        # Check default path relative to repo_root
+        default_file = repo_root / "scripts" / "deploy" / "deploy_customizations.py"
         if default_file.exists():
-            target_path = "scripts.deploy.deploy_customizations"
-            must_exist = False # It exists (we checked), but if import fails, we might want to error?
-                           # Actually, if we resolved it from file existence, we expect it to work.
+            target_path = str(default_file.resolve())
+            must_exist = False # If it somehow fails but wasn't requested, we'll handle below
         else:
             # No hooks configured
-            return DeployHooks(None)
+            return DeployHooks(None, soft_fail=soft_fail)
 
-    # Soft fail config
-    soft_fail = os.getenv(VarsEnum.DEPLOY_HOOKS_SOFT_FAIL.value, "").lower() == "true"
-    
     print(f"🪝 [hooks] Loading hooks from: {target_path}")
     
     try:
-        # If it's a file path, load by path? 
-        # For simplicity, assume python module path if it doesn't look like a file.
-        # But user might pass "scripts/deploy/custom.py".
-        
         if target_path.endswith(".py") or "/" in target_path or "\\" in target_path:
-            # Load from file path
+            # Load from file path (more robust for default/CWD independence)
             path_obj = Path(target_path).resolve()
             if not path_obj.exists():
                 if must_exist:
-                    raise FileNotFoundError(f"Hook module not found: {path_obj}")
-                return DeployHooks(None)
+                    raise FileNotFoundError(f"Hook module not found at: {path_obj}")
+                return DeployHooks(None, soft_fail=soft_fail)
                 
             spec = importlib.util.spec_from_file_location("deploy_customizations", path_obj)
             if spec and spec.loader:
@@ -159,19 +163,14 @@ def load_hooks(module_path: str | None = None) -> DeployHooks:
             
         # Look for 'get_hooks'
         if hasattr(module, "get_hooks"):
-            hooks = module.get_hooks()
+            hooks_impl = module.get_hooks()
         else:
             # Assume module itself is the hooks object (standalone functions)
-            hooks = module
+            hooks_impl = module
             
-        return DeployHooks(hooks, soft_fail=soft_fail)
+        return DeployHooks(hooks_impl, soft_fail=soft_fail)
 
     except Exception as e:
-        if must_exist:
-            raise ImportError(f"Failed to load hooks from {target_path}: {e}")
-        else:
-            # Should satisfy "If only the default is attempted and it’s missing ⇒ no-op"
-            # But here we found the file existed (if default), so import failure is legitimate error?
-            # Creating a safe fallback: if explicitly requested, fail. If implicit default, maybe warn?
-            print(f"⚠️  [hooks] Failed to load default hooks: {e}", file=sys.stderr)
-            return DeployHooks(None)
+        # If successfully resolved but failed to import, it's a hard error
+        # regardless of whether it was requested or default.
+        raise ImportError(f"Failed to load hooks from {target_path}: {e}")
