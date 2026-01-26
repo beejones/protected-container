@@ -19,12 +19,15 @@ def test_generate_deploy_yaml_structure():
         acme_email="admin@test.com",
         basic_auth_user="admin",
         basic_auth_hash="$2a$14$test",
-        cpu_cores=1.0,
-        memory_gb=2.0,
+        app_cpu_cores=1.0,
+        app_memory_gb=2.0,
         share_workspace="workspace",
         caddy_data_share_name="caddy-data",
         caddy_config_share_name="caddy-config",
         caddy_image="caddy:2-alpine",
+        caddy_cpu_cores=0.5,
+        caddy_memory_gb=0.5,
+        app_port=8080,
     )
 
     assert "name: test-container" in yaml_out

@@ -3,8 +3,6 @@ from __future__ import annotations
 import math
 
 
-TLS_CPU_CORES = 0.25
-TLS_MEMORY_GB = 0.25
 
 
 def normalize_aci_memory_gb(memory_gb: float) -> float:
@@ -33,16 +31,22 @@ def generate_deploy_yaml(
     acme_email: str,
     basic_auth_user: str,
     basic_auth_hash: str,
-    cpu_cores: float,
-    memory_gb: float,
+    app_cpu_cores: float,
+    app_memory_gb: float,
     share_workspace: str,
     caddy_data_share_name: str,
     caddy_config_share_name: str,
     caddy_image: str,
+    caddy_cpu_cores: float,
+    caddy_memory_gb: float,
     app_port: int,
+    other_image: str | None = None,
+    other_cpu_cores: float = 0.5,
+    other_memory_gb: float = 0.5,
 ) -> str:
-    app_memory_gb = normalize_aci_memory_gb(memory_gb)
-    tls_memory_gb = normalize_aci_memory_gb(TLS_MEMORY_GB)
+    app_memory_gb = normalize_aci_memory_gb(app_memory_gb)
+    tls_memory_gb = normalize_aci_memory_gb(caddy_memory_gb)
+    other_mem_gb_norm = normalize_aci_memory_gb(other_memory_gb)
 
     def indent(level: int, text: str) -> str:
         return " " * level + text
@@ -112,7 +116,7 @@ def generate_deploy_yaml(
         indent(12, "protocol: TCP"),
         indent(8, "resources:"),
         indent(10, "requests:"),
-        indent(12, f"cpu: {cpu_cores}"),
+        indent(12, f"cpu: {app_cpu_cores}"),
         indent(12, f"memoryInGB: {app_memory_gb}"),
         indent(8, "environmentVariables:"),
         indent(10, "- name: CODE_SERVER_PORT"),
@@ -148,7 +152,7 @@ def generate_deploy_yaml(
         indent(12, "protocol: TCP"),
         indent(8, "resources:"),
         indent(10, "requests:"),
-        indent(12, f"cpu: {TLS_CPU_CORES}"),
+        indent(12, f"cpu: {caddy_cpu_cores}"),
         indent(12, f"memoryInGB: {tls_memory_gb}"),
         indent(8, "environmentVariables:"),
         indent(10, "- name: PUBLIC_DOMAIN"),
@@ -203,5 +207,33 @@ def generate_deploy_yaml(
         indent(8, f"storageAccountName: {storage_name}"),
         indent(8, f"storageAccountKey: {storage_key}"),
     ]
+    
+    if other_image:
+         # Find index of sidecar start to insert before it
+         # Looking for "- name: tls-proxy" (indented by 4 spaces)
+         insert_idx = -1
+         params_start = indent(4, "- name: tls-proxy")
+         for i, line in enumerate(lines):
+             if line.strip() == "- name: tls-proxy":
+                 insert_idx = i
+                 break
+         
+         if insert_idx == -1:
+             raise ValueError("Could not find insertion point for 'other' container (expected '- name: tls-proxy').")
+         else:
+             other_block = [
+                indent(4, "- name: other"),
+                indent(6, "properties:"),
+                indent(8, f"image: {other_image}"),
+                indent(8, "resources:"),
+                indent(10, "requests:"),
+                indent(12, f"cpu: {other_cpu_cores}"),
+                indent(12, f"memoryInGB: {other_mem_gb_norm}"),
+                indent(8, "volumeMounts:"),
+                indent(10, "- name: workspace-volume"),
+                indent(12, "mountPath: /home/coder/workspace"),
+                "",
+             ]
+             lines = lines[:insert_idx] + other_block + lines[insert_idx:]
 
     return "\n".join(lines) + "\n"

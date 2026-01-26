@@ -459,8 +459,18 @@ def main() -> None:
             + ". Set them in .env.deploy or pass --azure-client-id / --azure-app-display-name."
         )
 
+    synced_count = 0
+
+    def set_var_wrapper(repo, name, value, dry_run):
+        _set_variable(repo=repo, name=name, value=value, dry_run=dry_run)
+        return 1
+
+    def set_sec_wrapper(repo, name, value, dry_run):
+        _set_secret(repo=repo, name=name, value=value, dry_run=dry_run)
+        return 1
+
     if azure_client_id:
-        _set_variable(repo=repo, name=VarsEnum.AZURE_CLIENT_ID.value, value=azure_client_id, dry_run=dry_run)
+        synced_count += set_var_wrapper(repo, VarsEnum.AZURE_CLIENT_ID.value, azure_client_id, dry_run)
         if args.ensure_federated_credential and not dry_run:
             explicit_subject = (args.oidc_subject or "").strip()
             subjects: set[str] = set()
@@ -479,12 +489,12 @@ def main() -> None:
             for subject in sorted(subjects):
                 _ensure_federated_credential(app_id=azure_client_id, repo=repo, subject=subject)
     if azure_tenant_id:
-        _set_variable(repo=repo, name=VarsEnum.AZURE_TENANT_ID.value, value=azure_tenant_id, dry_run=dry_run)
+        synced_count += set_var_wrapper(repo, VarsEnum.AZURE_TENANT_ID.value, azure_tenant_id, dry_run)
     if azure_subscription_id:
-        _set_variable(repo=repo, name=VarsEnum.AZURE_SUBSCRIPTION_ID.value, value=azure_subscription_id, dry_run=dry_run)
+        synced_count += set_var_wrapper(repo, VarsEnum.AZURE_SUBSCRIPTION_ID.value, azure_subscription_id, dry_run)
 
     # 1) Always store runtime dotenv as a secret.
-    _set_secret(repo=repo, name=SecretsEnum.RUNTIME_ENV_DOTENV.value, value=runtime_text, dry_run=dry_run)
+    synced_count += set_sec_wrapper(repo, SecretsEnum.RUNTIME_ENV_DOTENV.value, runtime_text, dry_run)
 
     # 1b) Also sync specific runtime keys needed by the workflow directly.
     for spec in RUNTIME_SCHEMA:
@@ -492,14 +502,16 @@ def main() -> None:
         if not val:
             continue
         if EnvTarget.GH_ACTIONS_VAR in spec.targets:
-            _set_variable(repo=repo, name=spec.key.value, value=val, dry_run=dry_run)
+            synced_count += set_var_wrapper(repo, spec.key.value, val, dry_run)
         if EnvTarget.GH_ACTIONS_SECRET in spec.targets:
-            _set_secret(repo=repo, name=spec.key.value, value=val, dry_run=dry_run)
+            synced_count += set_sec_wrapper(repo, spec.key.value, val, dry_run)
 
     if args.only_files:
+        print(f"\n✅ Synced {synced_count} items (only-files mode).")
         return
 
     if not args.also_sync_keys:
+        print(f"\n✅ Synced {synced_count} items (no-sync-keys mode).")
         return
 
     # 2) Optionally sync deploy-time keys, strictly derived from schema targets.
@@ -516,9 +528,11 @@ def main() -> None:
             continue
 
         if EnvTarget.GH_ACTIONS_VAR in spec.targets:
-            _set_variable(repo=repo, name=spec.key.value, value=val, dry_run=dry_run)
+            synced_count += set_var_wrapper(repo, spec.key.value, val, dry_run)
         if EnvTarget.GH_ACTIONS_SECRET in spec.targets:
-            _set_secret(repo=repo, name=spec.key.value, value=val, dry_run=dry_run)
+            synced_count += set_sec_wrapper(repo, spec.key.value, val, dry_run)
+            
+    print(f"\n✅ Synced {synced_count} items to GitHub Actions.")
 
 
 if __name__ == "__main__":

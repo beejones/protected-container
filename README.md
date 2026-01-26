@@ -35,28 +35,25 @@ Two containers in a container group (configuration derived from `docker-compose.
 |-----------|---------|-------|
 | `protected-azure-container` | code-server (VS Code) | Matches `docker-compose.yml` (default 8080) |
 | `tls-proxy` (Caddy) | TLS termination + Basic Auth | 80, 443 |
+| `other` (Optional) | Generic additional service | Matches `docker-compose.yml` role |
 
 ```
 Internet → Caddy (443) → [Basic Auth] → code-server (app_port)
-```
-
-```
-Internet → Caddy (443) → [Basic Auth] → code-server (app_port)
+                                      ↘ other (optional)
 ```
 
 ## Docker Compose as Source of Truth
 
-The deployment scripts (`scripts/deploy/`) are designed to read your repository's `docker-compose.yml` file to derive key configuration values. This ensures that your local development environment and your Azure production deployment stay in sync.
+The deployment scripts (`scripts/deploy/`) are designed to read your repository's `docker-compose.yml` file to derive key configuration values. This creates a clear contract using `x-deploy-role`:
 
-### Service Discovery via `x-deploy-role`
+1. **App Service**: `x-deploy-role: app`
+    - Main application (code-server).
 
-The deploy script discovers which service is which by looking for the `x-deploy-role` extension field in `docker-compose.yml`. This creates a clear, explicit contract that doesn't rely on guessing names.
+2. **Sidecar Service**: `x-deploy-role: sidecar`
+    - Caddy / TLS termination.
 
-1. **App Service**: Must have `x-deploy-role: app`
-    - The script uses this service to determine the port and build context.
-
-2. **Sidecar Service**: Must have `x-deploy-role: sidecar`
-    - The script uses this service to identify the image to deploy as the TLS proxy.
+3. **Other Service**: (Optional) Service with no special role or explicit `x-deploy-role: other` (implicit).
+    - Deployed as a generic sidecar container sharing the workspace volume.
 
 **Example:**
 
@@ -147,6 +144,28 @@ This repo uses a strict, schema-driven set of env keys.
 
 See env.example and env.deploy.example for the canonical keys.
 If you need to add a new key, follow: [docs/deploy/ENV_SCHEMA.md](docs/deploy/ENV_SCHEMA.md).
+
+## Migration Guide
+
+### Renamed Variables (Jan 2026)
+
+To support multiple containers, generic variable names have been updated:
+
+*   **`CONTAINER_IMAGE`** → **`APP_IMAGE`**
+*   **`DEFAULT_CPU_CORES`** → **`APP_CPU_CORES`**
+*   (CLI) `--cpu` → `--app-cpu` (old flag still works)
+*   (CLI) `--memory` → `--app-memory` (old flag still works)
+
+### New Sidecar/Other Variables
+
+*   `CADDY_IMAGE`, `CADDY_CPU_CORES`, `CADDY_MEMORY_GB`
+*   `OTHER_IMAGE`, `OTHER_CPU_CORES`, `OTHER_MEMORY_GB` (for generic third container)
+
+## Security Notes
+
+### `other` Container Volume Access
+
+If you deploy an `other` container (e.g., using `OTHER_IMAGE`), it shares the **same workspace volume** (`/home/coder/workspace`) as the main code-server container. This allows for convenient file sharing but implies that the `other` container has full read/write access to your code files. Ensure you trust the image used for the `other` container.
 
 ## License
 

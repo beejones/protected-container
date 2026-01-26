@@ -58,8 +58,8 @@ except ImportError:
     from azure_utils import kv_data_plane_available, kv_secret_set_quiet, run_az_command
 
 
-DEFAULT_CPU_CORES = float(get_spec(DEPLOY_SCHEMA, VarsEnum.DEFAULT_CPU_CORES).default or "1.0")
-DEFAULT_MEMORY_GB = float(get_spec(DEPLOY_SCHEMA, VarsEnum.DEFAULT_MEMORY_GB).default or "2.0")
+DEFAULT_CPU_CORES = float(get_spec(DEPLOY_SCHEMA, VarsEnum.APP_CPU_CORES).default or "1.0")
+DEFAULT_MEMORY_GB = float(get_spec(DEPLOY_SCHEMA, VarsEnum.APP_MEMORY_GB).default or "2.0")
 
 
 # Keep helper wiring centralized here; `main()` continues to use the historic names.
@@ -121,13 +121,18 @@ def generate_deploy_yaml(
     acme_email: str,
     basic_auth_user: str,
     basic_auth_hash: str,
-    cpu_cores: float,
-    memory_gb: float,
+    app_cpu_cores: float,
+    app_memory_gb: float,
     share_workspace: str,
     caddy_data_share_name: str,
     caddy_config_share_name: str,
     caddy_image: str,
-    app_port: int = 8080,
+    caddy_cpu_cores: float,
+    caddy_memory_gb: float,
+    app_port: int,
+    other_image: str | None = None,
+    other_cpu_cores: float = 0.5,
+    other_memory_gb: float = 0.5,
 ) -> str:
     """Back-compat re-export for tests and external callers."""
 
@@ -149,13 +154,18 @@ def generate_deploy_yaml(
         acme_email=acme_email,
         basic_auth_user=basic_auth_user,
         basic_auth_hash=basic_auth_hash,
-        cpu_cores=cpu_cores,
-        memory_gb=memory_gb,
+        app_cpu_cores=app_cpu_cores,
+        app_memory_gb=app_memory_gb,
         share_workspace=share_workspace,
         caddy_data_share_name=caddy_data_share_name,
         caddy_config_share_name=caddy_config_share_name,
         caddy_image=caddy_image,
+        caddy_cpu_cores=caddy_cpu_cores,
+        caddy_memory_gb=caddy_memory_gb,
         app_port=app_port,
+        other_image=other_image,
+        other_cpu_cores=other_cpu_cores,
+        other_memory_gb=other_memory_gb,
     )
 
 
@@ -334,13 +344,25 @@ def main() -> None:
         "--cpu",
         type=float,
         default=None,
-        help=f"CPU cores (default: {VarsEnum.DEFAULT_CPU_CORES.value} from .env.deploy, fallback {DEFAULT_CPU_CORES})",
+        help=f"App CPU cores (deprecated, use --app-cpu). Default: {VarsEnum.APP_CPU_CORES.value} from .env.deploy, fallback {DEFAULT_CPU_CORES}",
+    )
+    parser.add_argument(
+        "--app-cpu",
+        type=float,
+        default=None,
+        help="App CPU cores",
     )
     parser.add_argument(
         "--memory",
         type=float,
         default=None,
-        help=f"Memory GB (default: {VarsEnum.DEFAULT_MEMORY_GB.value} from .env.deploy, fallback {DEFAULT_MEMORY_GB})",
+        help=f"App Memory GB (deprecated, use --app-memory). Default: {VarsEnum.APP_MEMORY_GB.value} from .env.deploy, fallback {DEFAULT_MEMORY_GB})",
+    )
+    parser.add_argument(
+        "--app-memory",
+        type=float,
+        default=None,
+        help="App Memory GB",
     )
 
     # Prefer a stable mirror to avoid Docker Hub rate limiting in ACI.
@@ -382,6 +404,7 @@ def main() -> None:
         # Service Discovery via x-deploy-role (Concept: Explicit Contract)
         detected_app_name = None
         detected_caddy_name = None
+        detected_other_name = None
 
         for name, svc in services.items():
             role = compose_helpers.get_deploy_role(svc)
@@ -389,6 +412,8 @@ def main() -> None:
                 detected_app_name = name
             elif role == "sidecar":
                 detected_caddy_name = name
+            else:
+                detected_other_name = name
 
         # 1. Resolve Sidecar Service
         # CLI Argument > x-deploy-role > Auto-detect fallback (none)
@@ -691,7 +716,7 @@ def main() -> None:
     image = resolve_value(
         name="image",
         arg_value=args.image,
-        env_names=[VarsEnum.CONTAINER_IMAGE.value],
+        env_names=[VarsEnum.APP_IMAGE.value],
         kv_name=kv_name_for_secrets,
         kv_secret_name=args.image_secret,
         interactive=interactive,
@@ -701,7 +726,7 @@ def main() -> None:
     )
     if not image:
         raise SystemExit(
-            "Missing container image. Provide --image, set CONTAINER_IMAGE, or store Key Vault secret 'image'."
+            "Missing container image. Provide --image, set APP_IMAGE, or store Key Vault secret 'image'."
         )
 
     # Resolve build/push mode.
@@ -1007,16 +1032,53 @@ def main() -> None:
         except Exception as e:
             print(f"⚠️  [warn] Could not prefetch caddy image locally ({e}); continuing.", file=sys.stderr)
 
-    cpu_cores = float(
-        args.cpu
-        if args.cpu is not None
-        else (os.getenv(VarsEnum.DEFAULT_CPU_CORES.value) or str(DEFAULT_CPU_CORES))
+    app_cpu_cores = float(
+        args.app_cpu
+        or args.cpu
+        or os.getenv(VarsEnum.APP_CPU_CORES.value)
+        or get_spec(DEPLOY_SCHEMA, VarsEnum.APP_CPU_CORES).default 
+        or str(DEFAULT_CPU_CORES)
     )
-    memory_gb = float(
-        args.memory
-        if args.memory is not None
-        else (os.getenv(VarsEnum.DEFAULT_MEMORY_GB.value) or str(DEFAULT_MEMORY_GB))
+    app_memory_gb = float(
+        args.app_memory
+        or args.memory
+        or os.getenv(VarsEnum.APP_MEMORY_GB.value)
+        or get_spec(DEPLOY_SCHEMA, VarsEnum.APP_MEMORY_GB).default 
+        or str(DEFAULT_MEMORY_GB)
     )
+
+    caddy_cpu_cores = float(
+        os.getenv(VarsEnum.CADDY_CPU_CORES.value)
+        or get_spec(DEPLOY_SCHEMA, VarsEnum.CADDY_CPU_CORES).default 
+        or "0.5"
+    )
+    caddy_memory_gb = float(
+        os.getenv(VarsEnum.CADDY_MEMORY_GB.value)
+        or get_spec(DEPLOY_SCHEMA, VarsEnum.CADDY_MEMORY_GB).default 
+        or "0.5"
+    )
+
+    # Resolve "other" container config
+    # 1. Image: CLI > Env > docker-compose (detected_other_name)
+    other_image = os.getenv(VarsEnum.OTHER_IMAGE.value)
+    
+    if not other_image and detected_other_name and detected_other_name in services:
+        other_svc = services[detected_other_name]
+        other_image = compose_helpers.get_image(other_svc)
+        print(f"ℹ️  [deploy] Detected other service '{detected_other_name}' -> {other_image}")
+
+    other_cpu_cores = float(
+        os.getenv(VarsEnum.OTHER_CPU_CORES.value)
+        or get_spec(DEPLOY_SCHEMA, VarsEnum.OTHER_CPU_CORES).default 
+        or "0.25"
+    )
+    other_memory_gb = float(
+        os.getenv(VarsEnum.OTHER_MEMORY_GB.value)
+        or get_spec(DEPLOY_SCHEMA, VarsEnum.OTHER_MEMORY_GB).default 
+        or "0.5"
+    )
+
+    caddy_yaml_image = caddy_image
 
     yaml_text = generate_deploy_yaml(
         name=name,
@@ -1036,13 +1098,18 @@ def main() -> None:
         acme_email=acme_email,
         basic_auth_user=basic_auth_user,
         basic_auth_hash=basic_auth_hash,
-        cpu_cores=cpu_cores,
-        memory_gb=memory_gb,
+        app_cpu_cores=app_cpu_cores,
+        app_memory_gb=app_memory_gb,
         share_workspace=share_workspace,
         caddy_data_share_name=caddy_data_share,
         caddy_config_share_name=caddy_config_share,
-        caddy_image=caddy_image,
+        caddy_image=caddy_yaml_image,
+        caddy_cpu_cores=caddy_cpu_cores,
+        caddy_memory_gb=caddy_memory_gb,
         app_port=config_app_port,
+        other_image=other_image,
+        other_cpu_cores=other_cpu_cores,
+        other_memory_gb=other_memory_gb,
     )
 
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
