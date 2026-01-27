@@ -40,6 +40,7 @@ def test_generate_yaml_with_command_and_ports():
     
     # Verify command is present
     assert "command:" in yaml_text
+    assert "- /usr/local/bin/azure_start.sh" in yaml_text
     assert "- python" in yaml_text
     assert "- main.py" in yaml_text
     assert "- --port" in yaml_text
