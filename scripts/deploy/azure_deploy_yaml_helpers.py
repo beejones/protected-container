@@ -34,6 +34,7 @@ def generate_deploy_yaml(
     app_cpu_cores: float,
     app_memory_gb: float,
     share_workspace: str,
+    data_share_name: str | None = None,
     caddy_data_share_name: str,
     caddy_config_share_name: str,
     caddy_image: str,
@@ -182,6 +183,16 @@ def generate_deploy_yaml(
         indent(8, "volumeMounts:"),
         indent(10, "- name: workspace-volume"),
         indent(12, "mountPath: /home/coder/workspace"),
+    ]
+
+    # Optionally mount durable storage under /data for the app.
+    if data_share_name:
+        lines += [
+            indent(10, "- name: data-volume"),
+            indent(12, "mountPath: /data"),
+        ]
+
+    lines += [
         "",
         indent(4, "- name: tls-proxy"),
         indent(6, "properties:"),
@@ -237,6 +248,18 @@ def generate_deploy_yaml(
         indent(8, f"shareName: {share_workspace}"),
         indent(8, f"storageAccountName: {storage_name}"),
         indent(8, f"storageAccountKey: {storage_key}"),
+    ]
+
+    if data_share_name:
+        lines += [
+            indent(4, "- name: data-volume"),
+            indent(6, "azureFile:"),
+            indent(8, f"shareName: {data_share_name}"),
+            indent(8, f"storageAccountName: {storage_name}"),
+            indent(8, f"storageAccountKey: {storage_key}"),
+        ]
+
+    lines += [
         indent(4, "- name: caddy-data"),
         indent(6, "azureFile:"),
         indent(8, f"shareName: {caddy_data_share_name}"),
