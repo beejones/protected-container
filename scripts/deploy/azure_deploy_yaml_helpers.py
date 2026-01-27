@@ -163,9 +163,18 @@ def generate_deploy_yaml(
             indent(12, f"value: '{identity_tenant_id}'"),
         ]
 
+    # NOTE: In ACI, setting `command:` overrides the image ENTRYPOINT.
+    # Our Dockerfile ENTRYPOINT runs /usr/local/bin/azure_start.sh to fetch
+    # Key Vault secrets and then exec the app process. When the compose-driven
+    # deploy sets an explicit app command (e.g. uvicorn/python), we must prefix
+    # it with azure_start.sh to preserve that behavior.
     if app_command:
+        effective_app_command = list(app_command)
+        if effective_app_command[0] != "/usr/local/bin/azure_start.sh":
+            effective_app_command = ["/usr/local/bin/azure_start.sh", *effective_app_command]
+
         lines += [indent(8, "command:")]
-        for arg in app_command:
+        for arg in effective_app_command:
             lines += [indent(10, f"- {arg}")]
 
     # Entrypoint: default from Dockerfile (/usr/local/bin/azure_start.sh)
