@@ -34,6 +34,7 @@ def generate_deploy_yaml(
     app_cpu_cores: float,
     app_memory_gb: float,
     share_workspace: str,
+    data_share_name: str | None = None,
     caddy_data_share_name: str,
     caddy_config_share_name: str,
     caddy_image: str,
@@ -46,7 +47,12 @@ def generate_deploy_yaml(
     other_image: str | None = None,
     other_cpu_cores: float = 0.5,
     other_memory_gb: float = 0.5,
+    restart_policy: str = "OnFailure",
 ) -> str:
+    restart_policy_norm = str(restart_policy or "").strip() or "OnFailure"
+    if restart_policy_norm not in {"Always", "OnFailure", "Never"}:
+        raise ValueError("restart_policy must be one of: Always, OnFailure, Never")
+
     app_memory_gb = normalize_aci_memory_gb(app_memory_gb)
     tls_memory_gb = normalize_aci_memory_gb(caddy_memory_gb)
     other_mem_gb_norm = normalize_aci_memory_gb(other_memory_gb)
@@ -182,6 +188,16 @@ def generate_deploy_yaml(
         indent(8, "volumeMounts:"),
         indent(10, "- name: workspace-volume"),
         indent(12, "mountPath: /home/coder/workspace"),
+    ]
+
+    # Optionally mount durable storage under /data for the app.
+    if data_share_name:
+        lines += [
+            indent(10, "- name: data-volume"),
+            indent(12, "mountPath: /data"),
+        ]
+
+    lines += [
         "",
         indent(4, "- name: tls-proxy"),
         indent(6, "properties:"),
@@ -223,7 +239,7 @@ def generate_deploy_yaml(
         indent(12, "mountPath: /config"),
         "",
         indent(2, "osType: Linux"),
-        indent(2, "restartPolicy: Always"),
+        indent(2, f"restartPolicy: {restart_policy_norm}"),
         indent(2, "ipAddress:"),
         indent(4, "type: Public"),
         indent(4, f"dnsNameLabel: {dns_label}"),
@@ -237,6 +253,18 @@ def generate_deploy_yaml(
         indent(8, f"shareName: {share_workspace}"),
         indent(8, f"storageAccountName: {storage_name}"),
         indent(8, f"storageAccountKey: {storage_key}"),
+    ]
+
+    if data_share_name:
+        lines += [
+            indent(4, "- name: data-volume"),
+            indent(6, "azureFile:"),
+            indent(8, f"shareName: {data_share_name}"),
+            indent(8, f"storageAccountName: {storage_name}"),
+            indent(8, f"storageAccountKey: {storage_key}"),
+        ]
+
+    lines += [
         indent(4, "- name: caddy-data"),
         indent(6, "azureFile:"),
         indent(8, f"shareName: {caddy_data_share_name}"),
