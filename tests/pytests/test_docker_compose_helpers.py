@@ -97,3 +97,55 @@ def test_get_deploy_role(mock_compose_file):
     
     service_config = {"image": "foo"}
     assert compose_helpers.get_deploy_role(service_config) is None
+
+
+# --- get_volumes / get_volume_targets tests ---
+
+def test_get_volumes_short_syntax():
+    svc = {"volumes": ["./data:/data:rw", "./logs:/var/log"]}
+    assert compose_helpers.get_volumes(svc) == ["./data:/data:rw", "./logs:/var/log"]
+
+
+def test_get_volumes_long_syntax():
+    vols = [{"type": "bind", "source": "./data", "target": "/data"}]
+    assert compose_helpers.get_volumes({"volumes": vols}) == vols
+
+
+def test_get_volumes_missing_or_empty():
+    assert compose_helpers.get_volumes({}) == []
+    assert compose_helpers.get_volumes({"volumes": None}) == []
+    assert compose_helpers.get_volumes({"volumes": []}) == []
+    # Non-list is treated as empty for safety
+    assert compose_helpers.get_volumes({"volumes": "unexpected"}) == []
+
+
+def test_get_volume_targets_short_syntax():
+    svc = {"volumes": ["./data:/data:rw", "./logs:/var/log"]}
+    assert compose_helpers.get_volume_targets(svc) == ["/data", "/var/log"]
+
+
+def test_get_volume_targets_long_syntax():
+    svc = {"volumes": [
+        {"type": "bind", "source": "./data", "target": "/data"},
+        {"type": "volume", "source": "db-vol", "destination": "/var/lib/db"},
+    ]}
+    assert compose_helpers.get_volume_targets(svc) == ["/data", "/var/lib/db"]
+
+
+def test_get_volume_targets_mixed():
+    svc = {"volumes": [
+        "./uploads:/uploads",
+        {"type": "bind", "source": ".", "target": "/app"},
+    ]}
+    assert compose_helpers.get_volume_targets(svc) == ["/uploads", "/app"]
+
+
+def test_get_volume_targets_no_target():
+    # Single-segment string has no ':' separator → no target extracted
+    svc = {"volumes": ["named_volume"]}
+    assert compose_helpers.get_volume_targets(svc) == []
+
+
+def test_get_volume_targets_empty():
+    assert compose_helpers.get_volume_targets({}) == []
+    assert compose_helpers.get_volume_targets({"volumes": None}) == []
