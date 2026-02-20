@@ -33,7 +33,7 @@ Two containers in a container group:
 
 | Container | Purpose | Ports |
 |-----------|---------|-------|
-| `protected-azure-container` | code-server (VS Code) | 8080 (internal) |
+| `protected-container` | code-server (VS Code) | Matches `docker-compose.yml` (default 8080) |
 | `tls-proxy` (Caddy) | TLS termination + Basic Auth | 80, 443 |
 
 ```
@@ -51,12 +51,85 @@ Internet → Caddy (443) → [Basic Auth] → code-server (8080)
 
 If you want to use this project as a base for a new repo that needs a protected Azure container:
 
-### Option A: GitHub template flow (recommended)
+### Option A: Pinned submodule + wrappers + hooks (recommended)
+
+Best for repos that **already have their own app** and only need the deployment engine. You get a vendored, updatable copy of the upstream deploy scripts pinned to a specific commit.
+
+**What you get:**
+
+- Stable, repo-local entrypoints (wrappers) under `scripts/deploy/` so users and CI always run *your* scripts
+- A single customization surface (`deploy_customizations.py`) that upstream calls at lifecycle points (pre-validate, plan, render, etc.)
+- Reproducible builds — your repo records the exact upstream commit via the submodule pointer
+
+#### 1) Vendor upstream as a git submodule
+
+```bash
+git submodule add https://github.com/beejones/protected-container scripts/deploy/_upstream
+git submodule update --init --recursive
+```
+
+To update later:
+
+```bash
+git submodule update --remote --merge scripts/deploy/_upstream
+```
+
+#### 2) Create repo-local wrapper entrypoints
+
+Create thin wrapper scripts in `scripts/deploy/` that:
+
+1. Verify the submodule exists (fail fast with a helpful message).
+2. Put the upstream deploy scripts directory on `sys.path`.
+3. Import and invoke the upstream entrypoint with `repo_root_override` pointing to *your* repo:
+
+```python
+upstream_engine.main(argv_list, repo_root_override=repo_root)
+```
+
+This ensures upstream resolves `.env`, `.env.deploy`, and `docker-compose.yml` from the right place.
+
+If you also use the upstream GitHub Actions helpers, wrap them the same way (e.g. `gh_sync_actions_env.py`, `gh_nuke_secrets.py`).
+
+#### 3) Add a hooks module for customization
+
+Create `scripts/deploy/deploy_customizations.py` in your repo. The upstream engine loads hooks in this precedence order:
+
+1. `--hooks-module <path>`
+2. `DEPLOY_HOOKS_MODULE=<path>`
+3. `scripts/deploy/deploy_customizations.py` (default convention)
+
+Common hook uses:
+
+- Allowing additional runtime keys beyond the upstream schema
+- Translating legacy deploy keys (e.g. `GHCR_IMAGE` → `APP_IMAGE`)
+- Post-processing the rendered ACI YAML / Caddyfile (e.g. injecting additional reverse-proxy routes)
+
+#### 4) Ensure CI checks out submodules
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    submodules: recursive
+```
+
+#### 5) Keep env files and compose annotations aligned
+
+At minimum, upstream expects:
+
+- A runtime `.env` (secrets / runtime config)
+- A deploy-time `.env.deploy` (Azure + registry configuration)
+- A `docker-compose.yml` where the main app service is marked with `x-deploy-role: app`
+
+Start from the upstream examples (`env.example` and `env.deploy.example`), then adapt for your repo.
+
+---
+
+### Option B: GitHub template flow
 
 Use GitHub’s “Use this template” button, or use `gh` with the current repo as the template:
 
 ```bash
-gh repo create <your-org>/<new-repo> --public --template beejones/protected-azure-container
+gh repo create <your-org>/<new-repo> --public --template beejones/protected-container
 ```
 
 Note: this only works if this repo is marked as a **Template repository** in GitHub settings
@@ -64,10 +137,10 @@ Note: this only works if this repo is marked as a **Template repository** in Git
 
 Note: template-based repos are a snapshot. They do not automatically stay connected to this repo for future updates.
 
-### Option B: Clone and re-init git
+### Option C: Clone and re-init git
 
 ```bash
-git clone https://github.com/beejones/protected-azure-container.git my-new-repo
+git clone https://github.com/beejones/protected-container.git my-new-repo
 cd my-new-repo
 
 # Keep a link to the original repo so you can pull updates later

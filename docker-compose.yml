@@ -5,7 +5,7 @@ services:
     build:
       context: ./docker
       dockerfile: Dockerfile
-    container_name: protected-azure-container
+    container_name: protected-container
     restart: unless-stopped
     environment:
       # code-server runs on this port (internal)

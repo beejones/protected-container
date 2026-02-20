@@ -55,7 +55,7 @@ graph TB
 
 ---
 
-#### [MODIFY] [Dockerfile](file:///home/ronny/dev/protected-azure-container/docker/Dockerfile)
+#### [MODIFY] [Dockerfile](file:///home/ronny/dev/protected-container/docker/Dockerfile)
 
 Replace Chrome/noVNC setup with code-server:
 
@@ -71,7 +71,7 @@ Update supervisord if still needed to run code-server.
 
 ---
 
-#### [MODIFY] [docker-compose.yml](file:///home/ronny/dev/protected-azure-container/docker-compose.yml)
+#### [MODIFY] [docker-compose.yml](file:///home/ronny/dev/protected-container/docker-compose.yml)
 
 Add Caddy sidecar service and update networking:
 CODE_SERVER_PASSWORD will be fetched from Key Vault in production, from .env in development. Keyvault will have an env secret which is downloaded and store in the .env file.
@@ -83,7 +83,7 @@ PUBLIC_DOMAIN and ACME_EMAIL are only used during deployment and is stored in .e
 services:
   app:
     build: .
-    container_name: protected-azure-container
+    container_name: protected-container
     environment:
       # code-server config
       CODE_SERVER_PORT: 8080
@@ -125,7 +125,7 @@ volumes:
 
 ---
 
-#### [NEW] [docker/Caddyfile](file:///home/ronny/dev/protected-azure-container/docker/Caddyfile)
+#### [NEW] [docker/Caddyfile](file:///home/ronny/dev/protected-container/docker/Caddyfile)
 
 > **Answer: Move to docker/** - Yes, for consistency with `supervisord.conf`.
 >
@@ -153,7 +153,7 @@ TLS configuration with automatic cert management:
 ---
 There is only one main deployment script which is scripts/deploy/azure_deploy_container.py. With this one single script we can deploy the container and the caddy sidecar.
 
-#### [MODIFY] [scripts/azure_start.py](file:///home/ronny/dev/protected-azure-container/scripts/azure_start.py)
+#### [MODIFY] [scripts/azure_start.py](file:///home/ronny/dev/protected-container/scripts/azure_start.py)
 
 Update entrypoint to:
 1. Fetch secrets from Key Vault
@@ -171,7 +171,7 @@ Update ACI deployment to:
 
 ---
 
-#### [MODIFY] [docker/supervisord.conf](file:///home/ronny/dev/protected-azure-container/docker/supervisord.conf)
+#### [MODIFY] [docker/supervisord.conf](file:///home/ronny/dev/protected-container/docker/supervisord.conf)
 
 Run code-server with `--auth none` (Caddy handles auth):
 
@@ -195,7 +195,7 @@ stderr_logfile_maxbytes=0
 
 ---
 
-#### [MODIFY] [docs/AZURE_CONTAINER.md](file:///home/ronny/dev/protected-azure-container/docs/AZURE_CONTAINER.md)
+#### [MODIFY] [docs/AZURE_CONTAINER.md](file:///home/ronny/dev/protected-container/docs/AZURE_CONTAINER.md)
 
 Update documentation for:
 - New VS Code-based architecture
@@ -204,7 +204,7 @@ Update documentation for:
 
 ---
 
-#### [MODIFY] [README.md](file:///home/ronny/dev/protected-azure-container/README.md)
+#### [MODIFY] [README.md](file:///home/ronny/dev/protected-container/README.md)
 
 Update to reflect new purpose and quickstart.
 

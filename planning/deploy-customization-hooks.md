@@ -23,7 +23,7 @@ Non-goals:
 
 ## Upstream-first Workflow (How we will build this)
 
-We implement the hook mechanism **in upstream first** (protected-azure-container), then adapt camera-storage-viewer to use it.
+We implement the hook mechanism **in upstream first** (protected-container), then adapt camera-storage-viewer to use it.
 
 1) **Upstream implementation**
 - Add the minimal loader + hook runner (`scripts/deploy/deploy_hooks.py`).
