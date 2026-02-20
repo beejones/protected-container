@@ -34,7 +34,7 @@ Two containers in a container group (configuration derived from `docker-compose.
 
 | Container | Purpose | Ports |
 |-----------|---------|-------|
-| `protected-azure-container` | code-server (VS Code) | Matches `docker-compose.yml` (default 8080) |
+| `protected-container` | code-server (VS Code) | Matches `docker-compose.yml` (default 8080) |
 | `tls-proxy` (Caddy) | TLS termination + Basic Auth | 80, 443 |
 | `other` (Optional) | Generic additional service | Matches `docker-compose.yml` role |
 
@@ -104,7 +104,7 @@ Best for repos that **already have their own app** and only need the deployment 
 #### 1) Vendor upstream as a git submodule
 
 ```bash
-git submodule add https://github.com/beejones/protected-azure-container scripts/deploy/_upstream
+git submodule add https://github.com/beejones/protected-container scripts/deploy/_upstream
 git submodule update --init --recursive
 ```
 
@@ -169,7 +169,7 @@ Start from the upstream examples (`env.example` and `env.deploy.example`), then 
 Use GitHub’s “Use this template” button, or use `gh` with the current repo as the template:
 
 ```bash
-gh repo create <your-org>/<new-repo> --public --template beejones/protected-azure-container
+gh repo create <your-org>/<new-repo> --public --template beejones/protected-container
 ```
 
 Note: this only works if this repo is marked as a **Template repository** in GitHub settings
@@ -180,7 +180,7 @@ Note: template-based repos are a snapshot. They do not automatically stay connec
 ### Option C: Clone and re-init git
 
 ```bash
-git clone https://github.com/beejones/protected-azure-container.git my-new-repo
+git clone https://github.com/beejones/protected-container.git my-new-repo
 cd my-new-repo
 
 # Keep a link to the original repo so you can pull updates later

@@ -168,7 +168,7 @@ DEPLOY_SCHEMA: tuple[EnvKeySpec, ...] = (
     EnvKeySpec(
         key=VarsEnum.AZURE_RESOURCE_GROUP,
         mandatory=False,
-        default="protected-azure-container-rg",
+        default="protected-container-rg",
         targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
     ),
     EnvKeySpec(
@@ -180,7 +180,7 @@ DEPLOY_SCHEMA: tuple[EnvKeySpec, ...] = (
     EnvKeySpec(
         key=VarsEnum.AZURE_CONTAINER_NAME,
         mandatory=False,
-        default="protected-azure-container",
+        default="protected-container",
         targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
     ),
     EnvKeySpec(

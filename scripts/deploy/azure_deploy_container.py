@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Deploy protected-azure-container to Azure Container Instances (ACI).
+"""Deploy protected-container to Azure Container Instances (ACI).
 
 Model:
 - Multi-container group:
-    - protected-azure-container app (code-server)
+    - protected-container app (code-server)
     - Caddy TLS proxy (HTTPS + reverse proxy; Basic Auth)
 - Secrets:
     - Full .env is stored as a Key Vault secret (default: 'env')
@@ -188,7 +188,7 @@ def generate_deploy_yaml(
 
 
 def main(argv: list[str] | None = None, repo_root_override: Path | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Deploy protected-azure-container to Azure Container Instances")
+    parser = argparse.ArgumentParser(description="Deploy protected-container to Azure Container Instances")
 
     # These can come from --env-file (recommended) so they are not required.
     parser.add_argument("--resource-group", "-g", required=False, default=None)
@@ -766,8 +766,8 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         name = (
             args.container_name
             or os.getenv(VarsEnum.AZURE_CONTAINER_NAME.value)
-            or "protected-azure-container"
-        ).strip() or "protected-azure-container"
+            or "protected-container"
+        ).strip() or "protected-container"
         dns_label = (args.dns_label or name).strip().lower()
     
         storage_name = (args.storage_name or f"{rg}stg").replace("-", "")
@@ -781,7 +781,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         if args.keyvault_name:
             kv_name = args.keyvault_name
         else:
-            # e.g. "protected-azure-container-rg" -> "protectedazurecontainkv"
+            # e.g. "protected-container-rg" -> "protectedazurecontainkv"
             base = "".join([c for c in rg.lower() if c.isalnum()])
             kv_name = f"{base}kv"[:24]
     
@@ -919,7 +919,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             kv_secret_name=args.image_secret,
             interactive=interactive,
             secret=False,
-            prompt_label="Container image (e.g. ghcr.io/<owner>/protected-azure-container:tag)",
+            prompt_label="Container image (e.g. ghcr.io/<owner>/protected-container:tag)",
             persist_to_kv=persist_to_kv,
         )
         if not image:

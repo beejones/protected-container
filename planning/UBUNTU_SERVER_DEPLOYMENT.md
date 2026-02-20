@@ -1,6 +1,6 @@
 # Ubuntu Server Deployment Target — protected-container (upstream)
 
-This plan covers the work to be done in this repo (`protected-azure-container`, to be renamed
+This plan covers the work to be done in this repo (`protected-container`, to be renamed
 `protected-container`) to support Ubuntu server as a first-class deployment target alongside
 Azure ACI.
 
@@ -25,7 +25,7 @@ Stock-dashboard-specific work is tracked separately in
 
 ### Rename
 
-Rename `protected-azure-container` → `protected-container` on GitHub
+Rename `protected-container` → `protected-container` on GitHub
 (`Settings → General → Repository name`).
 
 GitHub automatically redirects the old URL. Existing submodule references continue to work,

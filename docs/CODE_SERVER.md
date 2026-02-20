@@ -1,6 +1,6 @@
 # code-server Setup
 
-This document explains the code-server configuration in protected-azure-container.
+This document explains the code-server configuration in protected-container.
 
 ## Overview
 

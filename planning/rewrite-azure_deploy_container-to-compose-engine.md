@@ -4,7 +4,7 @@
 Right now we have two competing realities:
 
 - **Goal:** Docker Compose is the single source of truth, and repo-specific deploy customization lives in hooks.
-- **Reality:** `scripts/deploy/azure_deploy_container.py` still embodies the upstream “protected-azure-container / code-server” deployment shape (e.g. `CODE_SERVER_PORT`), which can produce an ACI container group that boots Caddy but crashes the app container for camera-storage-viewer.
+- **Reality:** `scripts/deploy/azure_deploy_container.py` still embodies the upstream “protected-container / code-server” deployment shape (e.g. `CODE_SERVER_PORT`), which can produce an ACI container group that boots Caddy but crashes the app container for camera-storage-viewer.
 
 This plan rewrites `scripts/deploy/azure_deploy_container.py` so it **derives the deploy spec from `docker-compose.yml`**, and uses **deploy hooks** to customize behavior without forking core logic.
 
