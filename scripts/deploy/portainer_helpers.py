@@ -222,6 +222,7 @@ def _extract_container_names(stack_content: str) -> list[str]:
 
 def portainer_ensure_running_remote_cmd(*, https_port: int) -> str:
     return (
+        "docker network inspect caddy >/dev/null 2>&1 || docker network create caddy >/dev/null; "
         "if docker ps --format '{{.Names}}' | grep -Fxq portainer; then "
         "echo '[ubuntu-deploy] Portainer already running'; "
         "elif docker ps -a --format '{{.Names}}' | grep -Fxq portainer; then "
@@ -233,5 +234,6 @@ def portainer_ensure_running_remote_cmd(*, https_port: int) -> str:
         f"docker run -d --name portainer --restart=unless-stopped -p 8000:8000 -p {https_port}:9443 "
         "-v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data "
         "portainer/portainer-ce:latest >/dev/null; "
-        "fi"
+        "fi; "
+        "docker network connect caddy portainer >/dev/null 2>&1 || true"
     )

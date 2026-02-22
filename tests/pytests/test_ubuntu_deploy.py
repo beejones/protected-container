@@ -5,6 +5,7 @@ from scripts.deploy.ubuntu_deploy import (
     build_docker_build_cmd,
     build_docker_push_cmd,
     build_rsync_cmd,
+    build_ssh_connectivity_cmd,
     build_ssh_cmd,
     parse_boolish,
     prepare_stack_content_for_portainer,
@@ -70,12 +71,19 @@ def test_build_ssh_cmd_basic():
     assert cmd == ["ssh", "user@host", "echo hi"]
 
 
+def test_build_ssh_connectivity_cmd_basic():
+    cmd = build_ssh_connectivity_cmd(host="user@host")
+    assert cmd == ["ssh", "user@host", "echo SSH_OK"]
+
+
 def test_portainer_ensure_running_remote_cmd_contains_expected_steps():
     out = portainer_ensure_running_remote_cmd(https_port=9943)
+    assert "docker network inspect caddy" in out
     assert "docker ps --format '{{.Names}}'" in out
     assert "docker ps -a --format '{{.Names}}'" in out
     assert "docker start portainer" in out
     assert "docker run -d --name portainer" in out
+    assert "docker network connect caddy portainer" in out
     assert "-p 9943:9443" in out
 
 

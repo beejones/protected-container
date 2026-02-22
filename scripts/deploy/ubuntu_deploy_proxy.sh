@@ -28,7 +28,8 @@ if [ -z "${PUBLIC_DOMAIN:-}" ]; then
   exit 1
 fi
 
-PROXY_DIR="${UBUNTU_PROXY_DIR:-~/containers/central-proxy}"
+DEFAULT_PROXY_BASE="${UBUNTU_REMOTE_DIR:-~/containers/protected-container}"
+PROXY_DIR="${UBUNTU_PROXY_DIR:-${DEFAULT_PROXY_BASE}/docker/proxy}"
 
 echo "[proxy-deploy] 🚀 Deploying Central Caddy Proxy to ${UBUNTU_SSH_HOST}..."
 

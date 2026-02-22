@@ -15,12 +15,21 @@ This setup uses a **Centralized Proxy** approach:
 - Docker Engine + Docker Compose plugin (`docker compose`)
 - SSH access to the server (key-based auth recommended)
 - `rsync` installed locally and on the server
-- **DNS Records**: Point the domain names for both your application (e.g., `protected.example.com`) and Portainer (e.g., `portainer.example.com`) to your server's IP address.
 - **Firewall**: Ensure your server's firewall allows inbound TCP traffic on ports `80` and `443` ONLY. Do not expose `9000` or `9443` directly.
 
 ## Initial Server Setup
 
 Follow these steps once on a fresh Ubuntu server.
+
+### 0. Configure DNS
+
+Before deploying Caddy, you must configure your DNS provider so Let's Encrypt can issue certificates:
+
+Create two `A` records (or `CNAME` records) pointing to your Ubuntu server's public IP address:
+- `portainer.your-domain.com` (for the admin panel)
+- `protected.your-domain.com` (for the actual app)
+
+*If your DNS is not propagated, Caddy will fail to get SSL certificates and will return 502 Bad Gateway errors.*
 
 ### 1. Stand up Centralized Caddy
 

@@ -47,8 +47,42 @@ ENV_PORTAINER_STACK_NAME = "PORTAINER_STACK_NAME"
 ENV_PORTAINER_ENDPOINT_ID = "PORTAINER_ENDPOINT_ID"
 
 
-def _run(cmd: list[str], *, check: bool = True) -> None:
-    subprocess.run(cmd, check=check)
+def _subprocess_error_text(exc: subprocess.CalledProcessError) -> str:
+    stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else str(exc.stderr or "")
+    stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else str(exc.stdout or "")
+    text = (stderr.strip() or stdout.strip() or "").strip()
+    return text
+
+
+def _ssh_failure_hint(error_text: str) -> str:
+    lowered = error_text.lower()
+    if "no route to host" in lowered:
+        return "No route to host. Check VPN/LAN reachability and UBUNTU_SSH_HOST."
+    if "connection timed out" in lowered:
+        return "SSH timed out. Verify the server is online and port 22 is reachable."
+    if "connection refused" in lowered:
+        return "SSH connection refused. Confirm SSH daemon is running and port 22 is open."
+    if "permission denied" in lowered:
+        return "SSH authentication failed. Verify SSH key access for the configured user."
+    if "could not resolve hostname" in lowered:
+        return "Host resolution failed. Check UBUNTU_SSH_HOST for typos/DNS issues."
+    return ""
+
+
+def _run(cmd: list[str], *, check: bool = True, action: str | None = None) -> None:
+    try:
+        subprocess.run(cmd, check=check)
+    except subprocess.CalledProcessError as exc:
+        action_text = action or f"Command failed: {' '.join(cmd)}"
+        detail = _subprocess_error_text(exc)
+        message = f"{action_text} (exit code {exc.returncode})."
+        if detail:
+            message = f"{message} {detail}"
+        if cmd and cmd[0] == "ssh":
+            hint = _ssh_failure_hint(detail)
+            if hint:
+                message = f"{message} {hint}"
+        raise SystemExit(message)
 
 
 def build_rsync_cmd(*, sources: list[Path], host: str, remote_dir: Path) -> list[str]:
@@ -60,6 +94,10 @@ def build_rsync_cmd(*, sources: list[Path], host: str, remote_dir: Path) -> list
 
 def build_ssh_cmd(*, host: str, remote_command: str) -> list[str]:
     return ["ssh", host, remote_command]
+
+
+def build_ssh_connectivity_cmd(*, host: str) -> list[str]:
+    return build_ssh_cmd(host=host, remote_command="echo SSH_OK")
 
 
 def build_docker_build_cmd(*, app_image: str, dockerfile: str, context_dir: str) -> list[str]:
@@ -440,14 +478,44 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     log_info(f"Remote dir: {remote_dir}")
     log_info(f"Compose files: {compose_files}")
 
+    log_step("Checking SSH connectivity", icon="🔌")
+    try:
+        subprocess.run(
+            build_ssh_connectivity_cmd(host=resolved_host),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        raise SystemExit(
+            "SSH connectivity check timed out after 15s. "
+            "Verify the server is online and reachable on port 22."
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = _subprocess_error_text(exc)
+        message = "SSH connectivity check failed before deployment."
+        if detail:
+            message = f"{message} {detail}"
+        hint = _ssh_failure_hint(detail)
+        if hint:
+            message = f"{message} {hint}"
+        raise SystemExit(message)
+
     # Ensure remote dir exists.
     log_step("Ensuring remote deployment directory exists", icon="📁")
-    _run(build_ssh_cmd(host=resolved_host, remote_command=f"mkdir -p {shlex.quote(str(remote_dir))}"))
+    _run(
+        build_ssh_cmd(host=resolved_host, remote_command=f"mkdir -p {shlex.quote(str(remote_dir))}"),
+        action="Failed to create remote deployment directory over SSH",
+    )
 
     # Sync compose files and docker/ directory.
     log_step("Syncing compose files and docker assets", icon="📦")
     sync_paths: list[Path] = [repo_root / cf for cf in compose_files] + [repo_root / "docker"]
-    _run(build_rsync_cmd(sources=sync_paths, host=resolved_host, remote_dir=remote_dir))
+    _run(
+        build_rsync_cmd(sources=sync_paths, host=resolved_host, remote_dir=remote_dir),
+        action="Failed to sync compose files and docker assets",
+    )
 
     if resolved_sync_secrets:
         env_paths: list[Path] = []
@@ -459,7 +527,10 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                 log_info(f"Skipping missing {p}", icon="⚠️")
         if env_paths:
             log_step("Syncing environment files", icon="🔐")
-            _run(build_rsync_cmd(sources=env_paths, host=resolved_host, remote_dir=remote_dir))
+            _run(
+                build_rsync_cmd(sources=env_paths, host=resolved_host, remote_dir=remote_dir),
+                action="Failed to sync environment files",
+            )
         else:
             log_info("No env files to sync")
 
@@ -468,7 +539,8 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         build_ssh_cmd(
             host=resolved_host,
             remote_command=portainer_helpers.portainer_ensure_running_remote_cmd(https_port=resolved_portainer_https_port),
-        )
+        ),
+        action="Failed to ensure Portainer is running on the remote host",
     )
 
     if resolved_app_image and resolved_app_image.startswith("ghcr.io/") and resolved_ghcr_username and resolved_ghcr_token:
@@ -481,7 +553,8 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                     username=resolved_ghcr_username,
                     token=resolved_ghcr_token,
                 ),
-            )
+            ),
+            action="Failed remote GHCR login/pull for APP_IMAGE",
         )
 
     log_step("Ensuring Central Caddy Proxy is running", icon="🌐")
@@ -490,12 +563,19 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         host=resolved_host,
         remote_command="docker ps -a --format '{{.Names}}' | grep -Fxq central-proxy"
     )
-    result = subprocess.run(caddy_check_cmd, shell=True, capture_output=True)
+    result = subprocess.run(caddy_check_cmd, check=False, capture_output=True, text=True)
     if result.returncode != 0:
         log_info("Central proxy missing. Deploying via ubuntu_deploy_proxy.sh...")
         proxy_script = repo_root / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh"
         if proxy_script.exists():
-            subprocess.run(["bash", str(proxy_script)], check=True)
+            try:
+                subprocess.run(["bash", str(proxy_script)], check=True)
+            except subprocess.CalledProcessError as exc:
+                detail = _subprocess_error_text(exc)
+                message = "Failed to deploy central proxy via ubuntu_deploy_proxy.sh"
+                if detail:
+                    message = f"{message}: {detail}"
+                raise SystemExit(message)
         else:
             log_info(f"Warning: {proxy_script} not found. Cannot auto-deploy proxy.", icon="⚠️")
     else:
