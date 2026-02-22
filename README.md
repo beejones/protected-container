@@ -7,6 +7,25 @@ A world-class protected container setup featuring:
 - **Azure Managed Identity** for secure authentication
 - **GitHub Actions** CI/CD with OIDC authentication
 
+## Deployment Methods
+
+This repository supports three deployment methods depending on your target environment:
+
+1. **Local (Docker Compose)**
+  - Best for development and quick testing on your machine.
+  - Uses `docker/docker-compose.yml`.
+  - Start here: [Docker / Local Development Guide](docs/DOCKER.md)
+
+2. **Ubuntu Server (Portainer-based remote deploy)**
+  - Best for self-hosted Linux servers (for example your LAN/VPS host).
+  - Uses `scripts/deploy/ubuntu_deploy.py` with SSH + Portainer stack deployment.
+  - Start here: [Ubuntu Server Deployment](docs/deploy/UBUNTU_SERVER.md)
+
+3. **Azure Container Instances (ACI)**
+  - Best for managed cloud deployment with Azure services.
+  - Uses `scripts/deploy/azure_deploy_container.py` and optional GitHub Actions OIDC.
+  - Start here: [Azure Container Deployment](docs/deploy/AZURE_CONTAINER.md)
+
 ## Quick Start (Local Development)
 
 ```bash

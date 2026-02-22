@@ -376,6 +376,15 @@ def main() -> None:
             "Override the federated credential subject. Default is repo:<owner>/<repo>:ref:refs/heads/<default-branch>."
         ),
     )
+    ap.add_argument(
+        "--oidc-include-current-branch",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Also ensure an OIDC federated credential for the current git branch. "
+            "Default: disabled to avoid unbounded credential growth on the Azure App Registration."
+        ),
+    )
 
     args = ap.parse_args()
 
@@ -526,10 +535,13 @@ def main() -> None:
                 subjects.add(f"repo:{repo}:ref:refs/heads/{default_branch}")
                 # Also authorize the 'production' environment for GitHub Actions deployment jobs
                 subjects.add(f"repo:{repo}:environment:production")
-                
-                current_branch = _detect_current_branch()
-                if current_branch and current_branch != default_branch:
-                    subjects.add(f"repo:{repo}:ref:refs/heads/{current_branch}")
+
+                if args.oidc_include_current_branch:
+                    current_branch = _detect_current_branch()
+                    if current_branch and current_branch != default_branch:
+                        subjects.add(f"repo:{repo}:ref:refs/heads/{current_branch}")
+                    elif current_branch == default_branch:
+                        print("ℹ️  [info] Skipping extra OIDC branch subject: current branch matches default branch")
 
             for subject in sorted(subjects):
                 _ensure_federated_credential(app_id=azure_client_id, repo=repo, subject=subject)
