@@ -1,11 +1,13 @@
 # Ubuntu Server Deployment
 
-This document describes how to run this repository on a standalone Ubuntu server using Docker Compose, without Azure.
+This document describes how to deploy the `protected-container` alongside a central Caddy proxy and Portainer administrator panel on a standalone Ubuntu server.
 
-## Overview
+## Architecture
 
-- You deploy the same `docker/docker-compose.yml`, plus a small Ubuntu override file: `docker/docker-compose.ubuntu.yml`.
-- The Ubuntu override swaps the app entrypoint to `ubuntu_start.sh`, which sources `.env` and `.env.secrets` from a host directory.
+This setup uses a **Centralized Proxy** approach:
+- A single **Caddy** instance binds to host ports `80` and `443`.
+- All other containers (like `portainer` and `protected-container`) bind no host ports.
+- Caddy acts as the TLS terminator and routes incoming traffic to the appropriate containers via an external Docker network named `caddy`.
 
 ## Prerequisites
 
@@ -13,23 +15,83 @@ This document describes how to run this repository on a standalone Ubuntu server
 - Docker Engine + Docker Compose plugin (`docker compose`)
 - SSH access to the server (key-based auth recommended)
 - `rsync` installed locally and on the server
+- **Firewall**: Ensure your server's firewall allows inbound TCP traffic on ports `80` and `443` ONLY. Do not expose `9000` or `9443` directly.
 
-## Entrypoint: ubuntu_start.sh
+## Initial Server Setup
 
-The image includes `/usr/local/bin/ubuntu_start.sh`. On Ubuntu deployments, the compose override sets:
+Follow these steps once on a fresh Ubuntu server.
 
-- `entrypoint: ["/usr/local/bin/ubuntu_start.sh"]`
-- `command: ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]`
+### 0. Configure DNS
 
-The script reads:
+Before deploying Caddy, you must configure your DNS provider so Let's Encrypt can issue certificates:
 
-- `${ENV_DIR:-/opt/app}/.env`
-- `${ENV_DIR:-/opt/app}/.env.secrets` (optional)
+Create two `A` records (or `CNAME` records) pointing to your Ubuntu server's public IP address:
+- `portainer.your-domain.com` (for the admin panel)
+- `protected.your-domain.com` (for the actual app)
 
-## First Deploy (SSH)
+*If your DNS is not propagated, Caddy will fail to get SSL certificates and will return 502 Bad Gateway errors.*
 
-Use the Ubuntu deploy engine:
+### 1. Stand up Centralized Caddy
 
+The proxy configuration lives in `docker/proxy/docker-compose.yml` and `docker/proxy/Caddyfile`.
+Instead of manually copying and starting it, you can use the built-in deployment script which reads the host and domains from your `.env` files.
+
+Ensure your `.env` or `.env.secrets` has:
+```env
+ACME_EMAIL=your-email@example.com
+```
+And your `.env.deploy` has at minimum:
+```env
+UBUNTU_SSH_HOST=ronny@<server-ip>
+PUBLIC_DOMAIN=example.com
+```
+
+Then run the bash script:
+
+```bash
+# On your local machine, from the repository root:
+bash scripts/deploy/ubuntu_deploy_proxy.sh
+```
+
+*(This script automatically deploys to `~/containers/central-proxy` and ensures the external `caddy` docker network is created on the remote host.)*
+
+### 2. Stand up Portainer (Admin UI)
+
+Deploy Portainer and attach it to the `caddy` network. **Notice we do not publish any ports (`-p`)**.
+
+```bash
+# On the server:
+docker volume create portainer_data
+
+docker run -d \
+  --name portainer \
+  --restart=unless-stopped \
+  --network caddy \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v portainer_data:/data \
+  portainer/portainer-ce:latest
+```
+
+Wait a moment, then securely access Portainer via Caddy at `https://portainer.example.com`.
+Set up your initial admin password.
+
+## Deploying the Protected Container
+
+Now that the infrastructure is ready, deploy the `protected-container`.
+
+### Automatic Deployment (Recommended)
+
+Use the built-in deploy script that uses SSH to copy files and triggers a Portainer webhook. 
+
+Ensure you have created a Stack in Portainer named `protected-container` and enabled its Webhook.
+
+**Configure `.env.deploy.secrets` locally:**
+```env
+PORTAINER_WEBHOOK_TOKEN=<token-tail-only>
+PORTAINER_ACCESS_TOKEN=<your-portainer-api-token>
+```
+
+**Deploy:**
 ```bash
 source .venv/bin/activate
 python scripts/deploy/ubuntu_deploy.py \
@@ -37,207 +99,17 @@ python scripts/deploy/ubuntu_deploy.py \
   --sync-secrets
 ```
 
-`--host` is optional if `UBUNTU_SSH_HOST` is set (resolution order: CLI `--host` → env var `UBUNTU_SSH_HOST` → `.env.deploy`).
-`--remote-dir` is optional if `UBUNTU_REMOTE_DIR` is set (resolution order: CLI `--remote-dir` → env var `UBUNTU_REMOTE_DIR` → `.env.deploy` → `/opt/protected-container`).
+This pushes the image, syncs `docker-compose.yml` and `.env` files, and triggers Portainer to pull and restart the stack.
 
-`python scripts/deploy/ubuntu_deploy.py` can run with no args when defaults are present in `.env.deploy` / `.env.deploy.secrets`.
+## Troubleshooting Caddy
 
-This copies:
-
-- `docker/docker-compose.yml`
-- `docker/docker-compose.ubuntu.yml`
-- `docker/`
-- optionally `.env` + `.env.secrets` + `.env.deploy.secrets`
-
-Then triggers the configured Portainer stack webhook.
-
-## Updating
-
-Re-run the deploy command after pushing a new image or changing compose configuration.
-
-## Optional: Portainer on Ubuntu
-
-If you want to manage containers and stacks from a UI, run Portainer CE on the server.
-
-Valid ports are `1-65535`; use host port `9943` (not `99443`) mapped to Portainer's internal `9443`.
+If certificates fail to provision or routes return 502, inspect Caddy's logs:
 
 ```bash
-docker volume create portainer_data
-
-docker run -d \
-  --name portainer \
-  --restart=unless-stopped \
-  -p 8000:8000 \
-  -p 9943:9443 \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v portainer_data:/data \
-  portainer/portainer-ce:latest
+docker logs central-proxy
 ```
 
-Then open:
+Common issues:
+- **Rate Limits**: Let's Encrypt limits failed validations. Double-check your DNS points to the correct IP.
+- **Container Not Found**: Caddy resolves upstream targets by their container name (e.g., `reverse_proxy portainer:9000`). If the container is not on the `caddy` network or its name differs, Caddy will return a 502 error.
 
-- `https://<server-ip>:9943`
-
-If UFW is enabled, allow:
-
-```bash
-sudo ufw allow 9943/tcp
-```
-
-### Portainer stack for this repo
-
-- Single-app server (per-stack Caddy):
-  - `docker/docker-compose.yml`
-  - `docker/docker-compose.ubuntu.yml`
-- Multi-app server with shared Caddy:
-  - `docker/docker-compose.yml`
-  - `docker/docker-compose.ubuntu.yml`
-  - `docker/docker-compose.shared-caddy.yml`
-
-For shared-Caddy mode, create the external network once:
-
-```bash
-docker network create caddy
-```
-
-### Deploy via Portainer webhook
-
-To keep the app registered under a Portainer stack, let Portainer perform the deploy.
-
-Use the Ubuntu deploy script:
-
-```bash
-export PORTAINER_WEBHOOK_TOKEN=<token-tail-only>
-
-python scripts/deploy/ubuntu_deploy.py \
-  --remote-dir /home/ronny/containers/protected-container \
-  --sync-secrets
-```
-
-Notes:
-
-- Portainer webhook deployment is the only deployment mode.
-- `PORTAINER_WEBHOOK_TOKEN` is only the **last token segment** from the webhook URL, not the full URL.
-- Token resolution order is: `--portainer-webhook-token` → `PORTAINER_WEBHOOK_TOKEN` env var → `.env.deploy.secrets`.
-- Webhook URL resolution order is: `--portainer-webhook-url` → `PORTAINER_WEBHOOK_URL` env var → `.env.deploy.secrets` → `.env.deploy`.
-- Additional defaults from `.env.deploy`: `UBUNTU_COMPOSE_FILES`, `UBUNTU_SYNC_SECRETS`, `PORTAINER_HTTPS_PORT`, `PORTAINER_WEBHOOK_INSECURE`.
-- Portainer API auth is access-token only: use `PORTAINER_ACCESS_TOKEN` in `.env.deploy.secrets`.
-- The script automatically ensures Portainer is running on the server (creates or starts `portainer` container).
-- Use `--portainer-https-port` to change the auto-created Portainer host port (default `9943`).
-- Use `--portainer-webhook-insecure` if your webhook URL uses a self-signed TLS certificate.
-- Optional override: pass `--portainer-webhook-url` if you prefer using the full webhook URL directly.
-
-## Troubleshooting (Ubuntu)
-
-Use this checklist when `python scripts/deploy/ubuntu_deploy.py` does not complete successfully.
-
-### 1) SSH key auth fails
-
-Symptoms:
-
-- `Permission denied (publickey,password)`
-- deploy script fails before file sync
-
-Fix:
-
-```bash
-bash scripts/install_ssh_public_key.sh ronny@192.168.1.45 ~/.ssh/id_ed25519.pub
-ssh -o PreferredAuthentications=publickey -o PasswordAuthentication=no ronny@192.168.1.45
-```
-
-### 2) Remote path/permission errors
-
-Symptoms:
-
-- `Permission denied` writing to remote deploy directory
-
-Fix:
-
-- Use a writable user-owned path, for example:
-  - `UBUNTU_REMOTE_DIR=/home/<user>/containers/protected-container`
-- Re-run deploy.
-
-### 3) Portainer webhook 404
-
-Symptoms:
-
-- webhook trigger returns 404
-
-Fix:
-
-- Set `PORTAINER_ACCESS_TOKEN` in `.env.deploy.secrets` so the script can resolve/create stack webhook details via API.
-- Ensure `PORTAINER_HTTPS_PORT` matches your Portainer host port (default `9943`).
-- If using self-signed TLS, set `PORTAINER_WEBHOOK_INSECURE=true`.
-
-### 4) "Stack deployed via Portainer API; webhook token not returned"
-
-This is a successful path, not an error.
-
-- It means the stack was deployed through Portainer API directly.
-- Webhook trigger was skipped because Portainer did not return a webhook token.
-
-### 5) Wrong env key name for Portainer port
-
-Use this key:
-
-- `PORTAINER_HTTPS_PORT=9943`
-
-Do not rely on older/non-standard aliases.
-
-## Quick Verify (After Deploy)
-
-Run these checks after `python scripts/deploy/ubuntu_deploy.py`:
-
-```bash
-# 1) SSH connectivity
-ssh <user>@<host> "echo SSH_OK"
-
-# 2) Portainer is running
-ssh <user>@<host> "docker ps --format '{{.Names}}' | grep -Fx portainer"
-
-# 3) Stack containers are running
-ssh <user>@<host> "docker ps --format '{{.Names}}\t{{.Status}}' | grep -E 'protected-container|tls-proxy|caddy'"
-
-# 4) Portainer UI reachable
-curl -k -I https://<host>:<port>/
-
-# 5) App endpoint reachable (replace with your domain if configured)
-curl -k -I https://<host>/
-```
-
-Use `-k` only when testing against a self-signed certificate. Omit `-k` for valid public certificates.
-
-If step 3 returns nothing, open Portainer and inspect the stack logs/events.
-
-## Notes
-
-- For multi-app servers, you typically want a single shared Caddy instance bound to 80/443, and each app stack runs without its own Caddy sidecar.
-
-### Multi-app: Shared Caddy Pattern
-
-The default compose in this repo is **one Caddy per stack** (good for a single-app server). For multi-app, use the provided override:
-
-- [docker/docker-compose.shared-caddy.yml](../../docker/docker-compose.shared-caddy.yml)
-
-This override:
-
-- Adds the app stack to an external Docker network named `caddy`.
-- Puts the repo’s `caddy` sidecar behind a non-default profile so it does **not** start unless explicitly enabled.
-
-On the server, create the shared network once:
-
-```bash
-docker network create caddy
-```
-
-Then deploy the app stack using the extra override file:
-
-```bash
-python scripts/deploy/ubuntu_deploy.py \
-  --remote-dir /home/ronny/containers/protected-container \
-  --compose-files docker/docker-compose.yml,docker/docker-compose.ubuntu.yml,docker/docker-compose.shared-caddy.yml
-```
-
-For the shared Caddy instance itself, use a Caddyfile that contains *multiple* host blocks, for example:
-
-- [docker/Caddyfile.multiapp.example](../../docker/Caddyfile.multiapp.example)

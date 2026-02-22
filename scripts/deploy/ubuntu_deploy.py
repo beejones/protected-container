@@ -20,8 +20,13 @@ from pathlib import Path
 
 import requests
 from dotenv import dotenv_values
+import sys
 import urllib3
 import yaml
+
+sys.path.append(str(Path(__file__).parent))
+
+import portainer_helpers
 
 
 ENV_APP_IMAGE = "APP_IMAGE"
@@ -42,8 +47,42 @@ ENV_PORTAINER_STACK_NAME = "PORTAINER_STACK_NAME"
 ENV_PORTAINER_ENDPOINT_ID = "PORTAINER_ENDPOINT_ID"
 
 
-def _run(cmd: list[str], *, check: bool = True) -> None:
-    subprocess.run(cmd, check=check)
+def _subprocess_error_text(exc: subprocess.CalledProcessError) -> str:
+    stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else str(exc.stderr or "")
+    stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else str(exc.stdout or "")
+    text = (stderr.strip() or stdout.strip() or "").strip()
+    return text
+
+
+def _ssh_failure_hint(error_text: str) -> str:
+    lowered = error_text.lower()
+    if "no route to host" in lowered:
+        return "No route to host. Check VPN/LAN reachability and UBUNTU_SSH_HOST."
+    if "connection timed out" in lowered:
+        return "SSH timed out. Verify the server is online and port 22 is reachable."
+    if "connection refused" in lowered:
+        return "SSH connection refused. Confirm SSH daemon is running and port 22 is open."
+    if "permission denied" in lowered:
+        return "SSH authentication failed. Verify SSH key access for the configured user."
+    if "could not resolve hostname" in lowered:
+        return "Host resolution failed. Check UBUNTU_SSH_HOST for typos/DNS issues."
+    return ""
+
+
+def _run(cmd: list[str], *, check: bool = True, action: str | None = None) -> None:
+    try:
+        subprocess.run(cmd, check=check)
+    except subprocess.CalledProcessError as exc:
+        action_text = action or f"Command failed: {' '.join(cmd)}"
+        detail = _subprocess_error_text(exc)
+        message = f"{action_text} (exit code {exc.returncode})."
+        if detail:
+            message = f"{message} {detail}"
+        if cmd and cmd[0] == "ssh":
+            hint = _ssh_failure_hint(detail)
+            if hint:
+                message = f"{message} {hint}"
+        raise SystemExit(message)
 
 
 def build_rsync_cmd(*, sources: list[Path], host: str, remote_dir: Path) -> list[str]:
@@ -55,6 +94,10 @@ def build_rsync_cmd(*, sources: list[Path], host: str, remote_dir: Path) -> list
 
 def build_ssh_cmd(*, host: str, remote_command: str) -> list[str]:
     return ["ssh", host, remote_command]
+
+
+def build_ssh_connectivity_cmd(*, host: str) -> list[str]:
+    return build_ssh_cmd(host=host, remote_command="echo SSH_OK")
 
 
 def build_docker_build_cmd(*, app_image: str, dockerfile: str, context_dir: str) -> list[str]:
@@ -126,22 +169,6 @@ def prepare_stack_content_for_portainer(*, stack_content: str, app_image: str) -
     return yaml.safe_dump(payload, sort_keys=False)
 
 
-def extract_container_names_from_stack_content(stack_content: str) -> list[str]:
-    payload = yaml.safe_load(stack_content)
-    if not isinstance(payload, dict):
-        return []
-    services = payload.get("services")
-    if not isinstance(services, dict):
-        return []
-
-    names: list[str] = []
-    for service_payload in services.values():
-        if not isinstance(service_payload, dict):
-            continue
-        container_name = str(service_payload.get("container_name") or "").strip()
-        if container_name:
-            names.append(container_name)
-    return names
 
 
 def portainer_ensure_running_remote_cmd(*, https_port: int) -> str:
@@ -190,205 +217,6 @@ def build_and_push_local_image(*, repo_root: Path, app_image: str, dockerfile: s
     subprocess.run(push_cmd, cwd=str(repo_root), check=True)
 
 
-def _extract_webhook_token(payload: object) -> str:
-    if isinstance(payload, dict):
-        for key in ["Webhook", "webhook", "token", "Token", "webhookToken", "WebhookToken"]:
-            value = payload.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-        for value in payload.values():
-            token = _extract_webhook_token(value)
-            if token:
-                return token
-    if isinstance(payload, list):
-        for item in payload:
-            token = _extract_webhook_token(item)
-            if token:
-                return token
-    return ""
-
-
-def _portainer_auth_headers(*, access_token: str) -> dict[str, str]:
-    if access_token.strip():
-        return {"X-API-Key": access_token.strip()}
-    return {}
-
-
-def resolve_portainer_webhook_url_via_api(
-    *,
-    host: str,
-    https_port: int,
-    insecure: bool,
-    stack_name: str,
-    endpoint_id: str,
-    access_token: str,
-    stack_file_content: str,
-) -> str:
-    hostname = extract_ssh_hostname(host).strip()
-    base_url = f"https://{hostname}:{https_port}"
-    headers = _portainer_auth_headers(access_token=access_token)
-    if not headers:
-        return ""
-
-    stacks_resp = requests.get(f"{base_url}/api/stacks", headers=headers, verify=not insecure, timeout=20)
-    stacks_resp.raise_for_status()
-    stacks_payload = stacks_resp.json()
-    if not isinstance(stacks_payload, list):
-        raise SystemExit("Unexpected Portainer /api/stacks response format")
-
-    desired_name = stack_name.strip()
-
-    endpoints_resp = requests.get(f"{base_url}/api/endpoints", headers=headers, verify=not insecure, timeout=20)
-    endpoints_resp.raise_for_status()
-    endpoints_payload = endpoints_resp.json()
-    if not isinstance(endpoints_payload, list) or not endpoints_payload:
-        raise SystemExit("No Portainer endpoints found")
-
-    desired_endpoint = endpoint_id.strip()
-    if not desired_endpoint:
-        local_endpoint_id = ""
-        for endpoint in endpoints_payload:
-            if not isinstance(endpoint, dict):
-                continue
-            endpoint_name = str(endpoint.get("Name") or endpoint.get("name") or "").strip().lower()
-            endpoint_url = str(endpoint.get("URL") or endpoint.get("url") or "").strip().lower()
-            if endpoint_name == "local" or endpoint_url.startswith("unix://"):
-                local_endpoint_id = str(endpoint.get("Id") or endpoint.get("id") or "").strip()
-                if local_endpoint_id:
-                    break
-        if local_endpoint_id:
-            desired_endpoint = local_endpoint_id
-        else:
-            first_endpoint = endpoints_payload[0]
-            desired_endpoint = str(first_endpoint.get("Id") or first_endpoint.get("id") or "").strip()
-    if not desired_endpoint:
-        raise SystemExit("Unable to determine Portainer endpoint id; set PORTAINER_ENDPOINT_ID")
-
-    matching_stacks: list[dict[str, object]] = []
-    for stack in stacks_payload:
-        if not isinstance(stack, dict):
-            continue
-        candidate_name = str(stack.get("Name") or stack.get("name") or "").strip()
-        if candidate_name != desired_name:
-            continue
-        if desired_endpoint:
-            candidate_endpoint = str(stack.get("EndpointId") or stack.get("endpointId") or "").strip()
-            if candidate_endpoint != desired_endpoint:
-                continue
-        matching_stacks.append(stack)
-
-    for stack in matching_stacks:
-        stack_id = str(stack.get("Id") or stack.get("id") or "").strip()
-        if not stack_id:
-            continue
-        stack_endpoint = str(stack.get("EndpointId") or stack.get("endpointId") or "").strip() or desired_endpoint
-        delete_url = f"{base_url}/api/stacks/{stack_id}?endpointId={stack_endpoint}"
-        delete_resp = requests.delete(delete_url, headers=headers, verify=not insecure, timeout=20)
-        if not delete_resp.ok and int(delete_resp.status_code) != 404:
-            details = str(delete_resp.text or "").strip().replace("\n", " ")[:300]
-            raise SystemExit(f"Failed to remove existing Portainer stack '{desired_name}': {delete_resp.status_code} {details}")
-
-    cleanup_names = extract_container_names_from_stack_content(stack_file_content)
-    for container_name in cleanup_names:
-        _run(
-            build_ssh_cmd(
-                host=host,
-                remote_command=f"docker rm -f {shlex.quote(container_name)} >/dev/null 2>&1 || true",
-            )
-        )
-
-    create_url = f"{base_url}/api/stacks/create/standalone/string?endpointId={desired_endpoint}"
-    create_payload = {
-        "Name": desired_name,
-        "StackFileContent": stack_file_content,
-        "Env": [],
-        "FromAppTemplate": False,
-    }
-    create_resp = requests.post(
-        create_url,
-        headers=headers,
-        json=create_payload,
-        verify=not insecure,
-        timeout=30,
-    )
-
-    if not create_resp.ok:
-        status_code = int(create_resp.status_code)
-        details = str(create_resp.text or "").strip().replace("\n", " ")[:300]
-        raise SystemExit(f"Failed to create Portainer stack '{desired_name}': {status_code} {details}")
-
-    created_payload = create_resp.json()
-    created_stack_id = str(created_payload.get("Id") or created_payload.get("id") or "").strip()
-    created_webhook_token = _extract_webhook_token(created_payload)
-    if created_webhook_token:
-        return build_portainer_webhook_url(host=host, https_port=https_port, webhook_token=created_webhook_token)
-    if created_stack_id:
-        webhook_resp = requests.post(
-            f"{base_url}/api/stacks/{created_stack_id}/webhooks?endpointId={desired_endpoint}",
-            headers=headers,
-            verify=not insecure,
-            timeout=20,
-        )
-        if webhook_resp.ok:
-            created_token = _extract_webhook_token(webhook_resp.json())
-            if created_token:
-                return build_portainer_webhook_url(host=host, https_port=https_port, webhook_token=created_token)
-
-        return ""
-
-
-def build_portainer_webhook_urls_from_token(*, host: str, https_port: int, webhook_token: str) -> list[str]:
-    hostname = extract_ssh_hostname(host).strip()
-    token = webhook_token.strip()
-    return [
-        f"https://{hostname}:{https_port}/api/stacks/webhooks/{token}",
-        f"https://{hostname}:{https_port}/api/webhooks/{token}",
-    ]
-
-
-def extract_ssh_hostname(host: str) -> str:
-    return host.split("@", 1)[1] if "@" in host else host
-
-
-def build_portainer_webhook_url(*, host: str, https_port: int, webhook_token: str) -> str:
-    return build_portainer_webhook_urls_from_token(host=host, https_port=https_port, webhook_token=webhook_token)[0]
-
-
-def trigger_portainer_webhook(*, urls: list[str], insecure: bool, has_api_auth: bool) -> None:
-    saw_404 = False
-    last_error = ""
-    for url in urls:
-        try:
-            response = requests.post(url, verify=not insecure, timeout=20)
-        except requests.RequestException as exc:
-            last_error = str(exc)
-            continue
-
-        if response.ok:
-            return
-
-        if int(response.status_code) == 404:
-            saw_404 = True
-            last_error = f"HTTP 404 from {url}"
-            continue
-
-        details = str(response.text or "").strip().replace("\n", " ")[:200]
-        raise SystemExit(f"Portainer webhook trigger failed ({response.status_code}) at {url}: {details}")
-
-    if saw_404:
-        if not has_api_auth:
-            raise SystemExit(
-                "Portainer webhook returned 404 for all known endpoints and no Portainer API auth is configured. "
-                "Set PORTAINER_ACCESS_TOKEN in .env.deploy.secrets "
-                "so the script can auto-resolve/create the correct stack webhook."
-            )
-        raise SystemExit(
-            "Portainer webhook returned 404 for all known endpoints even after API-assisted resolution. "
-            "Verify PORTAINER_STACK_NAME/PORTAINER_ENDPOINT_ID and ensure the stack exists in Portainer."
-        )
-    if last_error:
-        raise SystemExit(last_error)
-    raise SystemExit("Portainer webhook trigger failed")
 
 
 def read_dotenv_key(*, dotenv_path: Path, key: str) -> str:
@@ -650,14 +478,44 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     log_info(f"Remote dir: {remote_dir}")
     log_info(f"Compose files: {compose_files}")
 
+    log_step("Checking SSH connectivity", icon="🔌")
+    try:
+        subprocess.run(
+            build_ssh_connectivity_cmd(host=resolved_host),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        raise SystemExit(
+            "SSH connectivity check timed out after 15s. "
+            "Verify the server is online and reachable on port 22."
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = _subprocess_error_text(exc)
+        message = "SSH connectivity check failed before deployment."
+        if detail:
+            message = f"{message} {detail}"
+        hint = _ssh_failure_hint(detail)
+        if hint:
+            message = f"{message} {hint}"
+        raise SystemExit(message)
+
     # Ensure remote dir exists.
     log_step("Ensuring remote deployment directory exists", icon="📁")
-    _run(build_ssh_cmd(host=resolved_host, remote_command=f"mkdir -p {shlex.quote(str(remote_dir))}"))
+    _run(
+        build_ssh_cmd(host=resolved_host, remote_command=f"mkdir -p {shlex.quote(str(remote_dir))}"),
+        action="Failed to create remote deployment directory over SSH",
+    )
 
     # Sync compose files and docker/ directory.
     log_step("Syncing compose files and docker assets", icon="📦")
     sync_paths: list[Path] = [repo_root / cf for cf in compose_files] + [repo_root / "docker"]
-    _run(build_rsync_cmd(sources=sync_paths, host=resolved_host, remote_dir=remote_dir))
+    _run(
+        build_rsync_cmd(sources=sync_paths, host=resolved_host, remote_dir=remote_dir),
+        action="Failed to sync compose files and docker assets",
+    )
 
     if resolved_sync_secrets:
         env_paths: list[Path] = []
@@ -669,7 +527,10 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                 log_info(f"Skipping missing {p}", icon="⚠️")
         if env_paths:
             log_step("Syncing environment files", icon="🔐")
-            _run(build_rsync_cmd(sources=env_paths, host=resolved_host, remote_dir=remote_dir))
+            _run(
+                build_rsync_cmd(sources=env_paths, host=resolved_host, remote_dir=remote_dir),
+                action="Failed to sync environment files",
+            )
         else:
             log_info("No env files to sync")
 
@@ -677,8 +538,9 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     _run(
         build_ssh_cmd(
             host=resolved_host,
-            remote_command=portainer_ensure_running_remote_cmd(https_port=resolved_portainer_https_port),
-        )
+            remote_command=portainer_helpers.portainer_ensure_running_remote_cmd(https_port=resolved_portainer_https_port),
+        ),
+        action="Failed to ensure Portainer is running on the remote host",
     )
 
     if resolved_app_image and resolved_app_image.startswith("ghcr.io/") and resolved_ghcr_username and resolved_ghcr_token:
@@ -691,12 +553,37 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                     username=resolved_ghcr_username,
                     token=resolved_ghcr_token,
                 ),
-            )
+            ),
+            action="Failed remote GHCR login/pull for APP_IMAGE",
         )
+
+    log_step("Ensuring Central Caddy Proxy is running", icon="🌐")
+    # Check if the global proxy container exists
+    caddy_check_cmd = build_ssh_cmd(
+        host=resolved_host,
+        remote_command="docker ps -a --format '{{.Names}}' | grep -Fxq central-proxy"
+    )
+    result = subprocess.run(caddy_check_cmd, check=False, capture_output=True, text=True)
+    if result.returncode != 0:
+        log_info("Central proxy missing. Deploying via ubuntu_deploy_proxy.sh...")
+        proxy_script = repo_root / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh"
+        if proxy_script.exists():
+            try:
+                subprocess.run(["bash", str(proxy_script)], check=True)
+            except subprocess.CalledProcessError as exc:
+                detail = _subprocess_error_text(exc)
+                message = "Failed to deploy central proxy via ubuntu_deploy_proxy.sh"
+                if detail:
+                    message = f"{message}: {detail}"
+                raise SystemExit(message)
+        else:
+            log_info(f"Warning: {proxy_script} not found. Cannot auto-deploy proxy.", icon="⚠️")
+    else:
+        log_info("Central proxy is already running.")
 
     if has_portainer_api_auth:
         log_step("Deploying stack through Portainer API", icon="🌐")
-        resolved_portainer_webhook_url = resolve_portainer_webhook_url_via_api(
+        resolved_portainer_webhook_url = portainer_helpers.resolve_portainer_webhook_url_via_api(
             host=resolved_host,
             https_port=resolved_portainer_https_port,
             insecure=resolved_portainer_webhook_insecure,
@@ -704,6 +591,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             endpoint_id=resolved_portainer_endpoint_id,
             access_token=resolved_portainer_access_token,
             stack_file_content=stack_file_content,
+            ssh_run_fn=lambda remote_command: _run(build_ssh_cmd(host=resolved_host, remote_command=remote_command)),
         )
 
     if has_portainer_api_auth and not resolved_portainer_webhook_url:
@@ -714,7 +602,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     webhook_urls = (
         [resolved_portainer_webhook_url]
         if resolved_portainer_webhook_url
-        else build_portainer_webhook_urls_from_token(
+        else portainer_helpers.build_portainer_webhook_urls_from_token(
             host=resolved_host,
             https_port=resolved_portainer_https_port,
             webhook_token=resolved_portainer_token,
@@ -722,7 +610,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     )
 
     log_step("Triggering Portainer webhook", icon="🪝")
-    trigger_portainer_webhook(
+    portainer_helpers.trigger_portainer_webhook(
         urls=webhook_urls,
         insecure=resolved_portainer_webhook_insecure,
         has_api_auth=has_portainer_api_auth,

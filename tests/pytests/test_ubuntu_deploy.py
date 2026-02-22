@@ -1,22 +1,25 @@
 from pathlib import Path
 
 from scripts.deploy.ubuntu_deploy import (
-    _extract_webhook_token,
     build_compose_config_cmd,
     build_docker_build_cmd,
     build_docker_push_cmd,
-    extract_container_names_from_stack_content,
-    build_portainer_webhook_urls_from_token,
-    build_portainer_webhook_url,
     build_rsync_cmd,
+    build_ssh_connectivity_cmd,
     build_ssh_cmd,
-    extract_ssh_hostname,
     parse_boolish,
     prepare_stack_content_for_portainer,
     rewrite_rendered_paths_for_remote,
     read_deploy_key,
     read_deploy_secret_key,
     read_dotenv_key,
+)
+from scripts.deploy.portainer_helpers import (
+    _extract_webhook_token,
+    _extract_container_names,
+    build_portainer_webhook_urls_from_token,
+    build_portainer_webhook_url,
+    extract_ssh_hostname,
     portainer_ensure_running_remote_cmd,
 )
 
@@ -68,12 +71,19 @@ def test_build_ssh_cmd_basic():
     assert cmd == ["ssh", "user@host", "echo hi"]
 
 
+def test_build_ssh_connectivity_cmd_basic():
+    cmd = build_ssh_connectivity_cmd(host="user@host")
+    assert cmd == ["ssh", "user@host", "echo SSH_OK"]
+
+
 def test_portainer_ensure_running_remote_cmd_contains_expected_steps():
     out = portainer_ensure_running_remote_cmd(https_port=9943)
+    assert "docker network inspect caddy" in out
     assert "docker ps --format '{{.Names}}'" in out
     assert "docker ps -a --format '{{.Names}}'" in out
     assert "docker start portainer" in out
     assert "docker run -d --name portainer" in out
+    assert "docker network connect caddy portainer" in out
     assert "-p 9943:9443" in out
 
 
@@ -184,7 +194,7 @@ services:
         assert "services still use build contexts" in str(exc)
 
 
-def test_extract_container_names_from_stack_content_reads_service_container_names():
+def test_extract_container_names_reads_service_container_names():
     stack_content = """
 services:
     app:
@@ -194,7 +204,7 @@ services:
     worker:
         image: busybox
 """
-    out = extract_container_names_from_stack_content(stack_content)
+    out = _extract_container_names(stack_content)
     assert out == ["protected-container", "tls-proxy"]
 
 
