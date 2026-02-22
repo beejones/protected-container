@@ -47,7 +47,7 @@ This copies:
 - `docker/docker-compose.yml`
 - `docker/docker-compose.ubuntu.yml`
 - `docker/`
-- optionally `.env` + `.env.secrets`
+- optionally `.env` + `.env.secrets` + `.env.deploy.secrets`
 
 Then triggers the configured Portainer stack webhook.
 
@@ -121,10 +121,91 @@ Notes:
 - Token resolution order is: `--portainer-webhook-token` → `PORTAINER_WEBHOOK_TOKEN` env var → `.env.deploy.secrets`.
 - Webhook URL resolution order is: `--portainer-webhook-url` → `PORTAINER_WEBHOOK_URL` env var → `.env.deploy.secrets` → `.env.deploy`.
 - Additional defaults from `.env.deploy`: `UBUNTU_COMPOSE_FILES`, `UBUNTU_SYNC_SECRETS`, `PORTAINER_HTTPS_PORT`, `PORTAINER_WEBHOOK_INSECURE`.
+- Portainer API auth is access-token only: use `PORTAINER_ACCESS_TOKEN` in `.env.deploy.secrets`.
 - The script automatically ensures Portainer is running on the server (creates or starts `portainer` container).
 - Use `--portainer-https-port` to change the auto-created Portainer host port (default `9943`).
 - Use `--portainer-webhook-insecure` if your webhook URL uses a self-signed TLS certificate.
 - Optional override: pass `--portainer-webhook-url` if you prefer using the full webhook URL directly.
+
+## Troubleshooting (Ubuntu)
+
+Use this checklist when `python scripts/deploy/ubuntu_deploy.py` does not complete successfully.
+
+### 1) SSH key auth fails
+
+Symptoms:
+
+- `Permission denied (publickey,password)`
+- deploy script fails before file sync
+
+Fix:
+
+```bash
+bash scripts/install_ssh_public_key.sh ronny@192.168.1.45 ~/.ssh/id_ed25519.pub
+ssh -o PreferredAuthentications=publickey -o PasswordAuthentication=no ronny@192.168.1.45
+```
+
+### 2) Remote path/permission errors
+
+Symptoms:
+
+- `Permission denied` writing to remote deploy directory
+
+Fix:
+
+- Use a writable user-owned path, for example:
+  - `UBUNTU_REMOTE_DIR=/home/<user>/containers/protected-container`
+- Re-run deploy.
+
+### 3) Portainer webhook 404
+
+Symptoms:
+
+- webhook trigger returns 404
+
+Fix:
+
+- Set `PORTAINER_ACCESS_TOKEN` in `.env.deploy.secrets` so the script can resolve/create stack webhook details via API.
+- Ensure `PORTAINER_HTTPS_PORT` matches your Portainer host port (default `9943`).
+- If using self-signed TLS, set `PORTAINER_WEBHOOK_INSECURE=true`.
+
+### 4) "Stack deployed via Portainer API; webhook token not returned"
+
+This is a successful path, not an error.
+
+- It means the stack was deployed through Portainer API directly.
+- Webhook trigger was skipped because Portainer did not return a webhook token.
+
+### 5) Wrong env key name for Portainer port
+
+Use this key:
+
+- `PORTAINER_HTTPS_PORT=9943`
+
+Do not rely on older/non-standard aliases.
+
+## Quick Verify (After Deploy)
+
+Run these checks after `python scripts/deploy/ubuntu_deploy.py`:
+
+```bash
+# 1) SSH connectivity
+ssh ronny@192.168.1.45 "echo SSH_OK"
+
+# 2) Portainer is running
+ssh ronny@192.168.1.45 "docker ps --format '{{.Names}}' | grep -Fx portainer"
+
+# 3) Stack containers are running
+ssh ronny@192.168.1.45 "docker ps --format '{{.Names}}\t{{.Status}}' | grep -E 'protected-container|tls-proxy|caddy'"
+
+# 4) Portainer UI reachable
+curl -k -I https://192.168.1.45:9943/
+
+# 5) App endpoint reachable (replace with your domain if configured)
+curl -k -I https://192.168.1.45/
+```
+
+If step 3 returns nothing, open Portainer and inspect the stack logs/events.
 
 ## Notes
 
