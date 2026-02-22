@@ -24,6 +24,24 @@ import urllib3
 import yaml
 
 
+ENV_APP_IMAGE = "APP_IMAGE"
+ENV_DOCKERFILE = "DOCKERFILE"
+ENV_GHCR_USERNAME = "GHCR_USERNAME"
+ENV_GHCR_TOKEN = "GHCR_TOKEN"
+ENV_UBUNTU_SSH_HOST = "UBUNTU_SSH_HOST"
+ENV_UBUNTU_REMOTE_DIR = "UBUNTU_REMOTE_DIR"
+ENV_UBUNTU_COMPOSE_FILES = "UBUNTU_COMPOSE_FILES"
+ENV_UBUNTU_BUILD_PUSH = "UBUNTU_BUILD_PUSH"
+ENV_UBUNTU_SYNC_SECRETS = "UBUNTU_SYNC_SECRETS"
+ENV_PORTAINER_HTTPS_PORT = "PORTAINER_HTTPS_PORT"
+ENV_PORTAINER_WEBHOOK_INSECURE = "PORTAINER_WEBHOOK_INSECURE"
+ENV_PORTAINER_WEBHOOK_URL = "PORTAINER_WEBHOOK_URL"
+ENV_PORTAINER_WEBHOOK_TOKEN = "PORTAINER_WEBHOOK_TOKEN"
+ENV_PORTAINER_ACCESS_TOKEN = "PORTAINER_ACCESS_TOKEN"
+ENV_PORTAINER_STACK_NAME = "PORTAINER_STACK_NAME"
+ENV_PORTAINER_ENDPOINT_ID = "PORTAINER_ENDPOINT_ID"
+
+
 def _run(cmd: list[str], *, check: bool = True) -> None:
     subprocess.run(cmd, check=check)
 
@@ -478,7 +496,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
     resolved_host = str(args.host or "").strip()
     if not resolved_host:
-        resolved_host = str(os.getenv("UBUNTU_SSH_HOST") or "").strip()
+        resolved_host = str(os.getenv(ENV_UBUNTU_SSH_HOST) or "").strip()
     if not resolved_host:
         resolved_host = read_deploy_key(repo_root=repo_root, key="UBUNTU_SSH_HOST")
     if not resolved_host:
@@ -486,7 +504,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
     resolved_remote_dir = str(args.remote_dir or "").strip()
     if not resolved_remote_dir:
-        resolved_remote_dir = str(os.getenv("UBUNTU_REMOTE_DIR") or "").strip()
+        resolved_remote_dir = str(os.getenv(ENV_UBUNTU_REMOTE_DIR) or "").strip()
     if not resolved_remote_dir:
         resolved_remote_dir = read_deploy_key(repo_root=repo_root, key="UBUNTU_REMOTE_DIR")
     if not resolved_remote_dir:
@@ -495,15 +513,15 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
     resolved_compose_files_raw = str(args.compose_files or "").strip()
     if not resolved_compose_files_raw:
-        resolved_compose_files_raw = str(os.getenv("UBUNTU_COMPOSE_FILES") or "").strip()
+        resolved_compose_files_raw = str(os.getenv(ENV_UBUNTU_COMPOSE_FILES) or "").strip()
     if not resolved_compose_files_raw:
         resolved_compose_files_raw = read_deploy_key(repo_root=repo_root, key="UBUNTU_COMPOSE_FILES")
 
-    resolved_app_image = str(os.getenv("APP_IMAGE") or "").strip()
+    resolved_app_image = str(os.getenv(ENV_APP_IMAGE) or "").strip()
     if not resolved_app_image:
         resolved_app_image = read_deploy_key(repo_root=repo_root, key="APP_IMAGE")
 
-    resolved_dockerfile = str(os.getenv("DOCKERFILE") or "").strip()
+    resolved_dockerfile = str(os.getenv(ENV_DOCKERFILE) or "").strip()
     if not resolved_dockerfile:
         resolved_dockerfile = read_deploy_key(repo_root=repo_root, key="DOCKERFILE")
     if not resolved_dockerfile:
@@ -511,28 +529,28 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
     resolved_build_push_enabled = not bool(args.skip_build_push)
     if resolved_build_push_enabled:
-        build_push_raw = str(os.getenv("UBUNTU_BUILD_PUSH") or "").strip()
+        build_push_raw = str(os.getenv(ENV_UBUNTU_BUILD_PUSH) or "").strip()
         if not build_push_raw:
             build_push_raw = read_deploy_key(repo_root=repo_root, key="UBUNTU_BUILD_PUSH")
         resolved_build_push_enabled = parse_boolish(build_push_raw, default=True)
 
     resolved_portainer_https_port_raw = str(args.portainer_https_port or "").strip()
     if not resolved_portainer_https_port_raw:
-        resolved_portainer_https_port_raw = str(os.getenv("PORTAINER_HTTPS_PORT") or "").strip()
+        resolved_portainer_https_port_raw = str(os.getenv(ENV_PORTAINER_HTTPS_PORT) or "").strip()
     if not resolved_portainer_https_port_raw:
         resolved_portainer_https_port_raw = read_deploy_key(repo_root=repo_root, key="PORTAINER_HTTPS_PORT")
     resolved_portainer_https_port = int(resolved_portainer_https_port_raw or "9943")
 
     resolved_sync_secrets = bool(args.sync_secrets)
     if not resolved_sync_secrets:
-        sync_secrets_raw = str(os.getenv("UBUNTU_SYNC_SECRETS") or "").strip()
+        sync_secrets_raw = str(os.getenv(ENV_UBUNTU_SYNC_SECRETS) or "").strip()
         if not sync_secrets_raw:
             sync_secrets_raw = read_deploy_key(repo_root=repo_root, key="UBUNTU_SYNC_SECRETS")
         resolved_sync_secrets = parse_boolish(sync_secrets_raw, default=True)
 
     resolved_portainer_webhook_insecure = bool(args.portainer_webhook_insecure)
     if not resolved_portainer_webhook_insecure:
-        webhook_insecure_raw = str(os.getenv("PORTAINER_WEBHOOK_INSECURE") or "").strip()
+        webhook_insecure_raw = str(os.getenv(ENV_PORTAINER_WEBHOOK_INSECURE) or "").strip()
         if not webhook_insecure_raw:
             webhook_insecure_raw = read_deploy_key(repo_root=repo_root, key="PORTAINER_WEBHOOK_INSECURE")
         resolved_portainer_webhook_insecure = parse_boolish(webhook_insecure_raw, default=False)
@@ -542,7 +560,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
     resolved_portainer_webhook_url = str(args.portainer_webhook_url or "").strip()
     if not resolved_portainer_webhook_url:
-        resolved_portainer_webhook_url = str(os.getenv("PORTAINER_WEBHOOK_URL") or "").strip()
+        resolved_portainer_webhook_url = str(os.getenv(ENV_PORTAINER_WEBHOOK_URL) or "").strip()
     if not resolved_portainer_webhook_url:
         resolved_portainer_webhook_url = read_deploy_secret_key(repo_root=repo_root, key="PORTAINER_WEBHOOK_URL")
     if not resolved_portainer_webhook_url:
@@ -550,29 +568,29 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
     resolved_portainer_token = str(args.portainer_webhook_token or "").strip()
     if not resolved_portainer_token:
-        resolved_portainer_token = str(os.getenv("PORTAINER_WEBHOOK_TOKEN") or "").strip()
+        resolved_portainer_token = str(os.getenv(ENV_PORTAINER_WEBHOOK_TOKEN) or "").strip()
     if not resolved_portainer_token:
         resolved_portainer_token = read_deploy_secret_key(repo_root=repo_root, key="PORTAINER_WEBHOOK_TOKEN")
 
-    resolved_portainer_access_token = str(os.getenv("PORTAINER_ACCESS_TOKEN") or "").strip()
+    resolved_portainer_access_token = str(os.getenv(ENV_PORTAINER_ACCESS_TOKEN) or "").strip()
     if not resolved_portainer_access_token:
         resolved_portainer_access_token = read_deploy_secret_key(repo_root=repo_root, key="PORTAINER_ACCESS_TOKEN")
 
-    resolved_portainer_stack_name = str(os.getenv("PORTAINER_STACK_NAME") or "").strip()
+    resolved_portainer_stack_name = str(os.getenv(ENV_PORTAINER_STACK_NAME) or "").strip()
     if not resolved_portainer_stack_name:
         resolved_portainer_stack_name = read_deploy_key(repo_root=repo_root, key="PORTAINER_STACK_NAME")
     if not resolved_portainer_stack_name:
         resolved_portainer_stack_name = remote_dir.name
 
-    resolved_portainer_endpoint_id = str(os.getenv("PORTAINER_ENDPOINT_ID") or "").strip()
+    resolved_portainer_endpoint_id = str(os.getenv(ENV_PORTAINER_ENDPOINT_ID) or "").strip()
     if not resolved_portainer_endpoint_id:
         resolved_portainer_endpoint_id = read_deploy_key(repo_root=repo_root, key="PORTAINER_ENDPOINT_ID")
 
-    resolved_ghcr_username = str(os.getenv("GHCR_USERNAME") or "").strip()
+    resolved_ghcr_username = str(os.getenv(ENV_GHCR_USERNAME) or "").strip()
     if not resolved_ghcr_username:
         resolved_ghcr_username = read_deploy_key(repo_root=repo_root, key="GHCR_USERNAME")
 
-    resolved_ghcr_token = str(os.getenv("GHCR_TOKEN") or "").strip()
+    resolved_ghcr_token = str(os.getenv(ENV_GHCR_TOKEN) or "").strip()
     if not resolved_ghcr_token:
         resolved_ghcr_token = read_deploy_secret_key(repo_root=repo_root, key="GHCR_TOKEN")
 
