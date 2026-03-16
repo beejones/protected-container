@@ -21,6 +21,7 @@ docker/
 | Extension | ID | Purpose |
 |-----------|----|---------|\n| Roo Code | `rooveterinaryinc.roo-cline` | AI coding assistant |
 | GitHub Pull Requests | `GitHub.vscode-pull-request-github` | PR management |
+| GitHub Copilot | `GitHub.copilot` | AI code completions and chat entrypoint |
 
 ### Installing Additional Extensions
 

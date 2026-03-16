@@ -28,7 +28,8 @@ COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 # Install VS Code extensions
 USER coder
 RUN code-server --install-extension rooveterinaryinc.roo-cline \
-    && code-server --install-extension GitHub.vscode-pull-request-github
+    && code-server --install-extension GitHub.vscode-pull-request-github \
+    && code-server --install-extension GitHub.copilot
 
 USER root
 

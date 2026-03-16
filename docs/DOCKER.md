@@ -46,7 +46,9 @@ docker run --rm caddy:2-alpine caddy hash-password --plaintext 'your-password'
 Extensions are pre-installed in `docker/Dockerfile`:
 
 ```dockerfile
-RUN code-server --install-extension rooveterinaryinc.roo-cline
+RUN code-server --install-extension rooveterinaryinc.roo-cline \
+   && code-server --install-extension GitHub.vscode-pull-request-github \
+   && code-server --install-extension GitHub.copilot
 ```
 
 To add more, edit the Dockerfile and rebuild:
