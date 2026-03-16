@@ -245,7 +245,6 @@ When you need to add new configuration keys, follow the schema guide: [docs/depl
 
 - **Roo Code** (`rooveterinaryinc.roo-cline`) - AI coding assistant
 - **GitHub Pull Requests** (`GitHub.vscode-pull-request-github`) - PR management
-- **GitHub Copilot** (`GitHub.copilot`) - AI code completions and chat entrypoint
 
 ## License
 
