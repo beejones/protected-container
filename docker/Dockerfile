@@ -19,6 +19,9 @@ RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
 # Create workspace directory
 RUN mkdir -p /home/coder/workspace && chown -R coder:coder /home/coder/workspace
 
+# Prepare the default log directory for the non-root code-server process.
+RUN mkdir -p /app/logs && chown -R coder:coder /app
+
 # Copy supervisor config
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
