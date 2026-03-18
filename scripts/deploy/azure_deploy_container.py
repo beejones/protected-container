@@ -51,6 +51,7 @@ from env_schema import (
     SecretsEnum,
     VarsEnum,
     apply_defaults,
+    get_derived_deploy_env_overrides,
     get_spec,
     parse_dotenv_file,
     validate_cross_field_rules,
@@ -766,7 +767,10 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                     deploy_kv_file.update(parse_dotenv_file(deploy_secrets_env))
 
                 deploy_schema_keys = {spec.key.value for spec in DEPLOY_SCHEMA}
-                deploy_kv_env = {k: v for k, v in os.environ.items() if k in deploy_schema_keys and str(v).strip()}
+                deploy_kv_env = get_derived_deploy_env_overrides(
+                    environ=os.environ,
+                    deploy_schema_keys=deploy_schema_keys,
+                )
                 
                 deploy_kv = dict(deploy_kv_file)
                 deploy_kv.update(deploy_kv_env)

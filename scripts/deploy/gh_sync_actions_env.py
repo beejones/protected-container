@@ -43,6 +43,7 @@ from env_schema import (
     SecretsEnum,
     VarsEnum,
     apply_defaults,
+    get_derived_deploy_env_overrides,
     parse_dotenv_file,
     truthy,
     validate_cross_field_rules,
@@ -458,7 +459,10 @@ def main() -> None:
 
         # Allow deploy-script-derived values (e.g. AZURE_OIDC_APP_NAME) to satisfy schema validation
         # when this script is invoked as a subprocess from azure_deploy_container.py.
-        deploy_kv_env = {k: v for k, v in os.environ.items() if k in deploy_schema_keys and str(v).strip()}
+        deploy_kv_env = get_derived_deploy_env_overrides(
+            environ=os.environ,
+            deploy_schema_keys=deploy_schema_keys,
+        )
         filtered_deploy_kv.update(deploy_kv_env)
 
         deploy_kv = apply_defaults(DEPLOY_SCHEMA, filtered_deploy_kv)
