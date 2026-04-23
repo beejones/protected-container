@@ -28,19 +28,19 @@ Every feature plan starts with cleanup of the module being changed. This guards 
 
 1. **List all files** in the target module and their line counts:
    ```bash
-   find src/<module>/ -name '*.py' | xargs wc -l | sort -n
+   find <module-path>/ -name '*.py' | xargs wc -l | sort -n
    ```
 
 2. **Identify dead code**:
    - Unused imports (use `grep` or IDE analysis).
-   - Functions/classes with zero callers (use `grep -r "function_name" src/`).
+   - Functions/classes with zero callers (use `grep -r "function_name" <module-path>/`).
    - Commented-out code blocks.
    - Deprecated feature flags or config branches.
 
 3. **Identify duplicate logic**:
    - Similar functions across files in the module.
    - Copy-pasted patterns that differ only in parameters.
-   - Logic that already exists in `src/common/` but was re-implemented.
+   - Logic that already exists elsewhere but was re-implemented.
 
 ### Step 2 — Remove Dead Code
 
@@ -54,12 +54,12 @@ Every feature plan starts with cleanup of the module being changed. This guards 
 
 ### Step 3 — Extract Helpers
 
-For files exceeding **1000 lines**:
+For files exceeding **1000 lines** (a guideline, not an absolute rule — cohesive single-purpose files may be appropriate as-is):
 
 1. Identify cohesive groups of helper functions.
-2. Extract them into `src/<module>/<name>_helpers.py`.
+2. Extract them into a dedicated helper module alongside the original file.
 3. Update imports in the original file.
-4. Check if **other modules** can reuse these helpers — if so, consider moving to `src/common/`.
+4. Check if **other modules** can reuse these helpers — if so, consider moving to a shared location.
 
 Naming convention:
 - Helper module: `<original_name>_helpers.py`
@@ -67,7 +67,7 @@ Naming convention:
 
 ### Step 4 — Refactor Duplicates
 
-1. Identify the canonical location for the logic (prefer `src/common/` for cross-module use).
+1. Identify the canonical location for the logic.
 2. Create a single reusable function or class.
 3. Replace all duplicate call sites with imports from the canonical location.
 4. Run tests after each replacement to catch breakage early.
@@ -88,7 +88,7 @@ For every extracted or refactored helper:
 
 ### Step 6 — Review Documentation
 
-1. Check `docs/<module>/` for:
+1. Check `docs/` for:
    - Missing documentation for new helpers or changed behavior.
    - Duplicate descriptions across files that should be consolidated.
    - Broken or incorrect internal links.
@@ -99,7 +99,7 @@ For every extracted or refactored helper:
 
 1. Run the full test suite:
    ```bash
-   source .venv/bin/activate && python scripts/run_tests.py
+   source .venv/bin/activate && python -m pytest tests/
    ```
 2. Verify no regressions.
 3. Commit with:
@@ -115,7 +115,7 @@ Phase 0 is complete when ALL of the following are true:
 - [ ] No file exceeds 1000 lines.
 - [ ] Duplicate logic has been consolidated into reusable helpers.
 - [ ] All extracted helpers have pytest coverage.
-- [ ] `docs/<module>/` is accurate and non-duplicative.
+- [ ] `docs/` is accurate and non-duplicative.
 - [ ] Full test suite passes with no regressions.
 
 ## Code Quality Checklist
