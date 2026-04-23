@@ -63,7 +63,7 @@ source .venv/bin/activate && python -m pytest tests/pytests/test_<module>.py::<T
 Then run the full test suite to check for regressions:
 
 ```bash
-source .venv/bin/activate && python scripts/run_tests.py
+source .venv/bin/activate && python -m pytest tests/
 ```
 
 | Result | Action |
@@ -92,15 +92,3 @@ Test: tests/pytests/test_<module>.py::<test_name>
 | Modifying the test to make it pass | The test defines correct behavior; changing it defeats the purpose. |
 | Skipping the "must fail" gate | Without proof of failure, the test may not actually cover the bug. |
 | Large refactors in the fix commit | Mix of concerns; keep the fix minimal and isolated. |
-
-## UI Bug Variant
-
-For bugs in templates, JS, or CSS:
-
-1. Follow the same hypothesis → test → fix → verify flow.
-2. Write the test in `tests/UI/test_ui_<module>.py` using Playwright.
-3. Start the dev server before running UI tests:
-   ```bash
-   source .venv/bin/activate && STOCK_DASHBOARD_TEST_MODE=true python run.py
-   ```
-4. Also visually verify the fix in a browser.
