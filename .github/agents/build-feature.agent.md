@@ -9,7 +9,7 @@ You are a **Build Feature Agent** that executes a structured plan-driven develop
 ## Critical Rules (from AGENT.md)
 
 - **NEVER** read `.env.secrets` or `.env.deploy.secrets`.
-- **NEVER** store temp files in the codebase. Use out/tmp for this purpose and clean up when done.
+- **NEVER** store temp files in the codebase. Use `out/` for this purpose and clean up when done.
 - **NEVER** push directly to `main`. ALL changes — including "small" fixes, one-liners, and UI tweaks — must go through a feature branch with a PR, tests, and CI. No exceptions.
 - **ALWAYS** run scripts within the virtual environment: `source .venv/bin/activate && ...`
 - Use repo folders consistently: `debug/` for one-off scripts, `out/` for temp artifacts, `logs/` for logs.
@@ -81,8 +81,8 @@ For each phase in the planning file:
 2. **Implement each task**, following the standards from AGENT.md. Key rules:
    - **PEP 8**, f-strings, `logging` module with prefixes.
    - **Dataclass-first** for internal data structures; `to_dict()`/`from_dict()` only at API/JSON boundaries. Search for existing dataclasses, type aliases, and helpers before creating new ones.
-   - **Strict typing everywhere** (production AND test code) — all function signatures must have type annotations, including test methods, fixtures, and local helpers. Use existing type aliases (e.g. `SweepComboRow`, `JobPayload`, `JSONValue`) from the codebase. Normalize nullable input at boundaries, pass strict types internally. Never use `Optional` for required values.
-   - **Reuse existing code** — before writing new helpers, search `src/common/`, the target module, and test fixtures for existing implementations. Import and reuse rather than duplicate.
+   - **Strict typing everywhere** (production AND test code) — all function signatures must have type annotations, including test methods, fixtures, and local helpers. Normalize nullable input at boundaries, pass strict types internally. Never use `Optional` for required values.
+   - **Reuse existing code** — before writing new helpers, search the target module and test fixtures for existing implementations. Import and reuse rather than duplicate.
    - **Bug-fix process** (MANDATORY when a bug is found during implementation):
      Follow the **bug-fix** skill (`.github/skills/bug-fix/SKILL.md`). This is a strict gate-checked process: hypothesis → failing test (MUST fail) → minimal fix → verify. Do NOT skip or reorder steps.
    - **Cleanup**: Delete obsolete code immediately. Review corresponding `docs/<module>/` for missing, duplicated, or broken documentation.
@@ -93,36 +93,19 @@ For each phase in the planning file:
 
 ### Stage 3 — Validate
 
-**Goal**: Ensure all changes work correctly through automated tests, API checks, and optionally browser checks.
+**Goal**: Ensure all changes work correctly through automated tests.
 
 1. **Run the full test suite**:
    ```bash
-   source .venv/bin/activate && python scripts/run_tests.py
+   source .venv/bin/activate && python -m pytest tests/
    ```
-   This auto-starts the dev server with `STOCK_DASHBOARD_TEST_MODE=true`, disables auth, and runs all pytests + UI tests.
 
 2. **Fix any failures**: Diagnose and fix — do not skip or disable tests. Re-run until all pass.
 
 3. **Push after tests pass** — commit-only pushes; do NOT re-run the full suite after pushing.
    - Do **not** create the PR here; defer PR creation to Stage 6.
 
-#### Additional checks
-
-3. **API spot checks** (if the feature adds/changes API endpoints):
-   - Start the dev server if not already running:
-     ```bash
-     source .venv/bin/activate && STOCK_DASHBOARD_TEST_MODE=true ALLOW_ANALYZER_MOCK=1 python run.py
-     ```
-   - Use `curl` to verify endpoints return expected results.
-   - Sanitize `NaN/inf → None` before `jsonify` (project convention from trading and analyzer APIs).
-
-4. **Browser checks** (MANDATORY if the feature touches templates, JS, or CSS):
-   - Start the dev server if not already running.
-   - Open the affected page in a browser and **visually verify** the UI works: buttons render, modals open, data loads correctly.
-   - Run relevant UI tests from `tests/UI/`.
-   - If no UI test covers the new behavior, write one in `tests/UI/test_ui_<module>.py`.
-
-5. **Commit any validation fixes** with clear messages.
+4. **Commit any validation fixes** with clear messages.
 
 ---
 
