@@ -29,6 +29,17 @@ def _portainer_auth_headers(*, access_token: str) -> dict[str, str]:
     return {}
 
 
+def _format_portainer_api_error(payload: object) -> str:
+    if not isinstance(payload, dict):
+        return ""
+
+    message = str(payload.get("message") or "").strip()
+    details = str(payload.get("details") or "").strip()
+    if message and details and details != message:
+        return f"{message}: {details}"
+    return message or details
+
+
 def extract_ssh_hostname(host: str) -> str:
     return host.split("@", 1)[1] if "@" in host else host
 
@@ -54,6 +65,9 @@ def resolve_portainer_webhook_url_via_api(
     stacks_resp.raise_for_status()
     stacks_payload = stacks_resp.json()
     if not isinstance(stacks_payload, list):
+        error_text = _format_portainer_api_error(stacks_payload)
+        if error_text:
+            raise SystemExit(f"Portainer /api/stacks returned an unexpected payload: {error_text}")
         raise SystemExit("Unexpected Portainer /api/stacks response format")
 
     desired_name = stack_name.strip()
@@ -62,6 +76,9 @@ def resolve_portainer_webhook_url_via_api(
     endpoints_resp.raise_for_status()
     endpoints_payload = endpoints_resp.json()
     if not isinstance(endpoints_payload, list) or not endpoints_payload:
+        error_text = _format_portainer_api_error(endpoints_payload)
+        if error_text:
+            raise SystemExit(f"Portainer /api/endpoints returned an unexpected payload: {error_text}")
         raise SystemExit("No Portainer endpoints found")
 
     desired_endpoint = endpoint_id.strip()
@@ -179,6 +196,9 @@ def is_portainer_access_token_valid(
 
     payload = resp.json()
     if not isinstance(payload, list):
+        error_text = _format_portainer_api_error(payload)
+        if error_text:
+            raise SystemExit(f"Portainer /api/endpoints returned an unexpected payload: {error_text}")
         raise SystemExit("Unexpected Portainer /api/endpoints response format")
     return True
 

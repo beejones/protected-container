@@ -2,9 +2,11 @@ from pathlib import Path
 
 from scripts.deploy.ubuntu_deploy import (
     _coerce_label_value,
+    _should_fallback_to_remote_compose,
     build_compose_config_cmd,
     build_docker_build_cmd,
     build_docker_push_cmd,
+    build_remote_compose_deploy_cmd,
     build_rsync_cmd,
     build_ssh_connectivity_cmd,
     build_ssh_cmd,
@@ -14,6 +16,7 @@ from scripts.deploy.ubuntu_deploy import (
     parse_boolish,
     prepare_stack_content_for_portainer,
     register_storage_manager_registrations,
+    resolve_network_host_from_ssh_target,
     rewrite_rendered_paths_for_remote,
     stack_has_service,
     read_deploy_key,
@@ -54,6 +57,19 @@ def test_build_compose_config_cmd_with_multiple_files():
     ]
 
 
+def test_build_remote_compose_deploy_cmd_contains_compose_variants_and_env_dir():
+    cmd = build_remote_compose_deploy_cmd(
+        remote_dir=Path("/home/ronny/containers/protected-container"),
+        compose_files=["docker/docker-compose.yml", "docker/docker-compose.ubuntu.yml"],
+    )
+
+    assert "cd /home/ronny/containers/protected-container" in cmd
+    assert "export ENV_DIR=/home/ronny/containers/protected-container" in cmd
+    assert "docker compose -f docker/docker-compose.yml -f docker/docker-compose.ubuntu.yml pull" in cmd
+    assert "docker compose -f docker/docker-compose.yml -f docker/docker-compose.ubuntu.yml up -d --remove-orphans" in cmd
+    assert "docker-compose -f docker/docker-compose.yml -f docker/docker-compose.ubuntu.yml up -d --remove-orphans" in cmd
+
+
 def test_build_docker_build_and_push_cmds():
     build_cmd = build_docker_build_cmd(
         app_image="ghcr.io/beejones/protected-container:latest",
@@ -81,6 +97,43 @@ def test_build_ssh_cmd_basic():
 def test_build_ssh_connectivity_cmd_basic():
     cmd = build_ssh_connectivity_cmd(host="user@host")
     assert cmd == ["ssh", "user@host", "echo SSH_OK"]
+
+
+def test_should_fallback_to_remote_compose_on_portainer_init_timeout():
+    assert _should_fallback_to_remote_compose(
+        "Portainer /api/endpoints returned an unexpected payload: Administrator initialization timeout"
+    ) is True
+    assert _should_fallback_to_remote_compose("Portainer access token was rejected") is False
+
+
+def test_resolve_network_host_from_ssh_target_uses_ssh_g(monkeypatch):
+    class DummyResult:
+        returncode = 0
+        stdout = "host ubuntu-server-01\nhostname 192.168.1.45\nuser ronny\n"
+
+    def fake_run(cmd, check, capture_output, text):
+        assert cmd == ["ssh", "-G", "ubuntu-server-01"]
+        assert check is False
+        assert capture_output is True
+        assert text is True
+        return DummyResult()
+
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.subprocess.run", fake_run)
+
+    assert resolve_network_host_from_ssh_target("ubuntu-server-01") == "192.168.1.45"
+
+
+def test_resolve_network_host_from_ssh_target_falls_back_to_plain_hostname(monkeypatch):
+    class DummyResult:
+        returncode = 255
+        stdout = ""
+
+    def fake_run(cmd, check, capture_output, text):
+        return DummyResult()
+
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.subprocess.run", fake_run)
+
+    assert resolve_network_host_from_ssh_target("ronny@ubuntu-server-01") == "ubuntu-server-01"
 
 
 def test_portainer_ensure_running_remote_cmd_contains_expected_steps():
@@ -174,6 +227,34 @@ def test_is_portainer_access_token_valid_false_on_401(monkeypatch):
         )
         is False
     )
+
+
+def test_is_portainer_access_token_valid_surfaces_portainer_message(monkeypatch):
+    class DummyResponse:
+        status_code = 303
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"message": "Administrator initialization timeout", "details": "Administrator initialization timeout"}
+
+    def fake_get(url, headers, verify, timeout):
+        return DummyResponse()
+
+    monkeypatch.setattr("scripts.deploy.portainer_helpers.requests.get", fake_get)
+
+    try:
+        is_portainer_access_token_valid(
+            host="ronny@192.168.1.45",
+            https_port=9943,
+            insecure=True,
+            access_token="token-123",
+        )
+    except SystemExit as exc:
+        assert "Administrator initialization timeout" in str(exc)
+    else:
+        raise AssertionError("Expected SystemExit")
 
 
 def test_read_deploy_secret_key_reads_token(tmp_path: Path):
