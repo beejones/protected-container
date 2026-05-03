@@ -9,10 +9,17 @@
 
 ## Checkable Task Overview
 
-- [ ] Phase 0: Audit stale copied references and define cleanup scope
-- [ ] Phase 1: Rewrite top-level agent instructions for this repo
-- [ ] Phase 2: Clean stale cross-repo references in planning and templates
-- [ ] Phase 3: Validate cleanup and prepare merge
+- [x] Phase 0: Audit stale copied references and define cleanup scope
+- [x] Phase 1: Rewrite top-level agent instructions for this repo
+- [x] Phase 2: Clean stale cross-repo references in planning and templates
+- [x] Phase 3: Validate cleanup and prepare merge
+
+## Completion Notes
+
+- `AGENT.md` was rewritten to describe this deployment toolkit rather than the copied stock-dashboard app.
+- Stale stock-dashboard wording was removed from the targeted planning files and issue template.
+- The final stale-reference sweep returned matches only inside this cleanup plan's own meta text and search command, which is acceptable.
+- This plan is complete and kept in `planning/` because the repo does not currently define a separate archive location or archived-plan naming convention.
 
 ## Phase 0: Audit Cleanup Scope
 
@@ -63,7 +70,7 @@ Expected outcomes:
 Validation commands:
 
 ```bash
-rg -n "stock[- ]dashboard|STOCK_DASHBOARD|trade strategy|optimizer|watchlist|analyzer|trader|HistoricalDataStore|signal pipeline" AGENT.md .github planning docs tests scripts
+grep -RInE "stock[- ]dashboard|STOCK_DASHBOARD|trade strategy|optimizer|watchlist|analyzer|trader|HistoricalDataStore|signal pipeline" AGENT.md .github planning docs tests scripts
 ```
 
 Plus diagnostics checks on edited markdown files.

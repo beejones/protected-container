@@ -3,17 +3,16 @@
 This plan covers the work in this repo (`protected-container`) to support Ubuntu server as a
 first-class deployment target alongside Azure ACI.
 
-Stock-dashboard-specific work is tracked separately in
-`stock-dashboard/planning/UBUNTU_SERVER_DEPLOYMENT.md`.
+Downstream-repo-specific rollout work should be tracked in the downstream repo's own planning files.
+```
+app1.example.com {
+    reverse_proxy app1:{$WEB_PORT:-3000}
+}
 
----
-
-## Task Checklist
-
-- [x] **Phase 0** — Rename repo & review existing docs
-- [x] **Phase 1** — `ubuntu_start.sh` plain entrypoint
-- [x] **Phase 2** — `ubuntu_deploy.py` SSH deploy engine script
-- [x] **Phase 3** — Generic `build_push.sh` local build+push helper
+app2.example.com {
+    reverse_proxy app2:{$APP2_PORT:-4000}
+}
+```
 - [x] **Phase 4** — Multi-app Caddy routing (Caddyfile template)
 - [x] **Phase 5** — Documentation (`docs/deploy/UBUNTU_SERVER.md`)
 - [ ] **Phase 6** — Verification
@@ -176,12 +175,12 @@ stack runs without a Caddy sidecar:
 ```
 {$ACME_EMAIL:?required}
 
-dashboard.example.com {
-    reverse_proxy stock-dashboard:{$WEB_PORT:-3000}
+app1.example.com {
+    reverse_proxy app1:{$WEB_PORT:-3000}
 }
 
-trader.example.com {
-    reverse_proxy trader-app:{$TRADER_PORT:-4000}
+app2.example.com {
+    reverse_proxy app2:{$APP2_PORT:-4000}
 }
 ```
 
