@@ -126,7 +126,7 @@ Validation rules:
 
 ### Stage 5 — Generate A Review Report
 
-**Goal**: produce a concise review artifact before PR creation.
+**Goal**: produce a concise review artifact that can be posted to the PR.
 
 1. Review the diff against `main`.
 2. Create `out/PR/Review_<branch_slug>.md` with:
@@ -135,21 +135,25 @@ Validation rules:
    - validation results
    - docs updated
    - any residual risks
-3. Stop for user review by default unless the user explicitly asked for the full PR lifecycle.
+3. Write the report so it can be used directly as the PR body or posted unchanged as a PR comment.
+4. Stop for user review by default unless the user explicitly asked for the full PR lifecycle.
 
 ---
 
 ### Stage 6 — PR, CI, And Merge
 
-**Goal**: create the PR, address feedback, and merge only after CI passes.
+**Goal**: create the PR, publish the review report, address feedback, and merge only after CI passes and GitHub reports the PR is mergeable.
 
 1. Verify the working tree is clean.
 2. Push all commits.
-3. Create the PR as a draft.
-4. Address Copilot and reviewer comments.
-5. Wait for CI and fix failures until green.
-6. Mark the PR ready and merge only when checks pass.
-7. Clean up the local branch and review artifact if appropriate.
+3. Create the PR as a draft and publish `out/PR/Review_<branch_slug>.md` in the PR body. If a PR already exists, update the PR body or add the report as a comment immediately.
+4. Confirm the PR actually contains the review report before continuing.
+5. Address Copilot and reviewer comments.
+6. Wait for CI and fix failures until green.
+7. Explicitly verify the PR is mergeable with no conflicts or blocked merge state. Green CI alone is not sufficient.
+8. If GitHub reports the PR as `DIRTY`, `CONFLICTING`, `BLOCKED`, or otherwise not mergeable, update from the base branch, resolve conflicts, rerun the relevant validation, push again, and wait for CI again.
+9. Mark the PR ready and merge only when required checks are successful, no required checks are pending, and GitHub reports the PR is cleanly mergeable.
+10. Clean up the local branch and review artifact if appropriate.
 
 ---
 
@@ -158,6 +162,8 @@ Validation rules:
 - Do not skip Phase 0 cleanup when a new plan is created.
 - Do not change deploy behavior in code without updating the relevant docs and examples.
 - Do not add repo-specific hardcoding where compose metadata, hooks, or schema-driven config should decide behavior.
+- Do not treat green CI as sufficient for merge. Merge requires both successful required checks and a cleanly mergeable PR with no conflicts.
+- Do not leave the review report only on disk when a PR is created. The report must be present in the PR body or comments.
 - Do not proceed to the next phase before the current phase exit criteria are met.
 
 ## Output
