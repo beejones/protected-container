@@ -2,48 +2,68 @@
 
 ## 1. Critical Rules (Must Follow)
 - **Security**: **NEVER** read `.env.secrets` or `.env.deploy.secrets`.
-- **Environment**: **ALWAYS** run scripts within the virtual environment.
+- **Temp files**: **NEVER** store scratch files in the codebase. Use `out/tmp` and clean up when done.
+- **Environment**: **ALWAYS** run Python tooling inside the virtual environment.
   ```bash
   source .venv/bin/activate && python <script>
   ```
-- **Server Startup**: Use the dedicated startup command to ensure proper logging.
-  ```bash
-  source .venv/bin/activate && python run.py
-  ```
+- **Source of truth**: Treat `docker/docker-compose.yml` and `scripts/deploy/env_schema.py` as authoritative for service shape and allowed deploy/runtime keys.
+- **Customization boundary**: Prefer deploy hooks and schema-driven config over hardcoded downstream-specific behavior in core deploy scripts.
 
 ## 2. Development Standards
+
 ### Code Quality
 - **Style**: Follow **PEP 8**. Use **f-strings** for formatting.
-- **Logging**: Use `logging` module at `DEBUG` level. Use prefixes: `[STORE]:`, `[COLLECTOR]:`, `[TRADER]:`.
-- **Error Handling**: Use `try-except` blocks. Fail gracefully; avoid complex fallback mechanisms unless strictly necessary for reliability.
-- **Bugs**: If bugs like uncaught exceptions are reported, we need to automatically add a test (pytest or UI) to make sure the error does not occur again.
-- **Arguments**: Avoid optional arguments (`arg=None`) unless strictly necessary to prevent ambiguity/bugs. Use dict only when necessary. Prioritize using data classes
-- **Cleanup**: Delete obsolete code immediately.
-- **Permissions**: You have permission to run tests without asking.
+- **Error handling**: Fail clearly. Use fallbacks only where they address real transient or platform-specific conditions.
+- **Bugs**: Follow the **bug-fix** skill (`.github/skills/bug-fix/SKILL.md`): hypothesis → failing test (must fail gate) → minimal fix → verify.
+- **Typing**: Normalize nullable or untyped input at boundaries, then pass strict required types internally.
+- **Reuse**: Search `scripts/deploy/`, existing tests, and deploy helpers before creating new abstractions.
+- **Docs maintenance**: When modifying deploy behavior, review the relevant docs in `docs/deploy/`, `README.md`, and any active planning file. Keep commands, env keys, and examples aligned with the code.
+- **Cleanup**: Delete obsolete code and stale documentation immediately.
+- **Permissions**: You have permission to run validation commands and tests without asking.
 
-# Project Context
+## 3. Project Context
 
-## 1. Project Overview
-**Stock Dashboard** is a Python web application for tracking and analyzing stock/crypto market data.
-- **Backend**: Flask + Socket.IO (threaded mode).
-- **Frontend**: HTML templates + Static Assets (JS/CSS).
-- **Core Functionality**: Real-time market data collection, technical analysis (indicators), and trading strategy execution.
+### Project Overview
+**Protected Container** is a deployment toolkit for running application payloads behind automatic HTTPS, with strict env-schema validation and parallel deploy paths for Ubuntu servers and Azure Container Instances.
 
-## 2. File Organization
-- `src/common/`: Shared utilities and core logic. **Reuse code from here whenever possible.**
-- `debug/`: Verification and one-off scripts. **Do NOT pollute the root directory.**
-- `out/`: Temporary output files including PR reviews and test reports.
-- `logs/`: Application logs (`logs/app.log`).
-- `tests/pytests/`: Unit and integration tests.
-- `tests/UI/`: UI tests using playwright
-- `planning/`: Planning files. Planning file must have a checkable task overview and clear phase exit criteria. The first phase in a plan should always be optimizing the module we are going to change. See (`docs/CODE_PROMPTS.md`) section ## cleanup. Also check if docs must be merged or are obsolete.
-- `docs/`: Documentation. Each major topic should have a doc. 
+Core concerns in this repo:
+- Docker Compose as the service contract
+- centralized Caddy routing for Ubuntu hosts
+- Portainer-assisted or direct Compose Ubuntu deploys
+- Azure ACI deploy generation from Compose
+- schema-driven env/secrets handling
+- hook-based downstream customization
+- storage-manager integration through Compose labels
 
-## 3. Workflows & Preferences
-### User Preferences
-- **CSV Exports**: Use semicolon (`;`) delimiter and comma (`,`) for decimals (Excel-friendly).
-- **PR Reviews**: Return reports as raw markdown files (e.g., `Review.md`).
+### File Organization
+Do not store temporary files in the source tree. Use `out/` for temporary artifacts.
 
-### Testing Context
-- **Tooling**: We use `pytest` for backend tests.
-- **Philosophy**: Tests are encouraged for all new logic.
+- `scripts/deploy/`: Core deployment logic, helpers, env schema, and deploy utilities.
+- `docker/`: Compose files, Dockerfiles, startup scripts, proxy stack, and storage-manager assets.
+- `docs/deploy/`: Deployment contracts, how-to guides, and customization docs.
+- `tests/pytests/`: Python unit and integration tests.
+- `planning/`: Active planning files. Plans must have checkable tasks and explicit phase exit criteria. Phase 0 should always be cleanup.
+- `out/`: Temporary output files, including review artifacts under `out/PR/`.
+- `.github/agents/` and `.github/skills/`: Repo-specific Copilot workflow customizations.
+
+## 4. Workflows And Preferences
+
+### Validation Context
+- **Tooling**: We use `pytest` for Python tests.
+- **Common focused checks**:
+  ```bash
+  source .venv/bin/activate && pytest -q tests/pytests/test_<module>.py
+  source .venv/bin/activate && python3 scripts/deploy/validate_env.py
+  source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py --help
+  source .venv/bin/activate && python scripts/deploy/azure_deploy_container.py --help
+  docker compose -f docker/docker-compose.yml config
+  ```
+- **CI baseline**: The GitHub Actions workflow currently runs `pytest` and Docker image build checks. Keep local validation aligned with the touched surface.
+- **Philosophy**: Prefer the narrowest executable check that can falsify the change before running broader validation.
+
+### Reviews
+- **PR Reviews**: Return review artifacts as raw markdown files under `out/PR/`.
+
+## 5. App-Specific Logic
+See `./AGENT_APP_SPECIFIC.md`.

@@ -47,7 +47,14 @@ ssh "${UBUNTU_SSH_HOST}" "
   cd ${PROXY_DIR}
   export ACME_EMAIL='${ACME_EMAIL}'
   export PUBLIC_DOMAIN='${PUBLIC_DOMAIN}'
-  docker compose up -d
+  if docker compose version >/dev/null 2>&1; then
+    docker compose up -d
+  elif command -v docker-compose >/dev/null 2>&1; then
+    docker-compose up -d
+  else
+    echo '[proxy-deploy] ❌ Error: Docker Compose is not installed on the remote host. Install docker-compose-v2 or docker-compose and retry.' >&2
+    exit 1
+  fi
 "
 
 echo "[proxy-deploy] ✅ Central Caddy Proxy deployed successfully."

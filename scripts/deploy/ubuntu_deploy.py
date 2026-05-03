@@ -115,6 +115,30 @@ def build_ssh_connectivity_cmd(*, host: str) -> list[str]:
     return build_ssh_cmd(host=host, remote_command="echo SSH_OK")
 
 
+def resolve_network_host_from_ssh_target(host: str) -> str:
+    raw_host = str(host).strip()
+    if not raw_host:
+        return ""
+
+    fallback_host = portainer_helpers.extract_ssh_hostname(raw_host).strip()
+    try:
+        result = subprocess.run(["ssh", "-G", raw_host], check=False, capture_output=True, text=True)
+    except OSError:
+        return fallback_host
+
+    if result.returncode != 0:
+        return fallback_host
+
+    for line in str(result.stdout or "").splitlines():
+        if not line.startswith("hostname "):
+            continue
+        resolved_host = line.split(None, 1)[1].strip()
+        if resolved_host:
+            return resolved_host
+
+    return fallback_host
+
+
 def build_docker_build_cmd(*, app_image: str, dockerfile: str, context_dir: str) -> list[str]:
     return ["docker", "build", "-f", dockerfile, "-t", app_image, context_dir]
 
@@ -129,6 +153,28 @@ def build_compose_config_cmd(*, compose_files: list[str]) -> list[str]:
         cmd.extend(["-f", compose_file])
     cmd.append("config")
     return cmd
+
+
+def build_remote_compose_deploy_cmd(*, remote_dir: Path, compose_files: list[str]) -> str:
+    quoted_remote_dir = shlex.quote(str(remote_dir))
+    compose_args = " ".join(f"-f {shlex.quote(str(compose_file))}" for compose_file in compose_files)
+    return (
+        f"cd {quoted_remote_dir} && "
+        f"export ENV_DIR={quoted_remote_dir} && "
+        "if docker compose version >/dev/null 2>&1; then "
+        f"docker compose {compose_args} pull && docker compose {compose_args} up -d --remove-orphans; "
+        "elif command -v docker-compose >/dev/null 2>&1; then "
+        f"docker-compose {compose_args} pull && docker-compose {compose_args} up -d --remove-orphans; "
+        "else "
+        "echo '[ubuntu-deploy] Docker Compose is not installed on the remote host. Install docker-compose-v2 or docker-compose and retry.' >&2; "
+        "exit 1; "
+        "fi"
+    )
+
+
+def _should_fallback_to_remote_compose(error_text: str) -> bool:
+    lowered = str(error_text).lower()
+    return "administrator initialization timeout" in lowered
 
 
 def render_compose_stack_content(*, repo_root: Path, compose_files: list[str]) -> str:
@@ -602,6 +648,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         resolved_host = read_deploy_key(repo_root=repo_root, key=ENV_UBUNTU_SSH_HOST)
     if not resolved_host:
         raise SystemExit("Missing SSH host: provide --host, set UBUNTU_SSH_HOST, or add UBUNTU_SSH_HOST to .env.deploy")
+    resolved_portainer_host = resolve_network_host_from_ssh_target(resolved_host)
 
     resolved_remote_dir = str(args.remote_dir or "").strip()
     if not resolved_remote_dir:
@@ -825,6 +872,8 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
     log_step("Prepared deployment plan", icon="🧭")
     log_info(f"Target: {resolved_host}")
+    if resolved_portainer_host and resolved_portainer_host != portainer_helpers.extract_ssh_hostname(resolved_host):
+        log_info(f"Portainer API host: {resolved_portainer_host}")
     log_info(f"Remote dir: {remote_dir}")
     log_info(f"Compose files: {compose_files}")
     if storage_registrations:
@@ -934,25 +983,49 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     else:
         log_info("Central proxy is already running.")
 
+    used_remote_compose_fallback = False
+
     if has_portainer_api_auth:
         log_step("Testing Portainer access token", icon="🔑")
-        if not portainer_helpers.is_portainer_access_token_valid(
-            host=resolved_host,
-            https_port=resolved_portainer_https_port,
-            insecure=resolved_portainer_webhook_insecure,
-            access_token=resolved_portainer_access_token,
-        ):
+        try:
+            token_valid = portainer_helpers.is_portainer_access_token_valid(
+                host=resolved_portainer_host,
+                https_port=resolved_portainer_https_port,
+                insecure=resolved_portainer_webhook_insecure,
+                access_token=resolved_portainer_access_token,
+            )
+        except SystemExit as exc:
+            error_text = str(exc)
+            if _should_fallback_to_remote_compose(error_text):
+                log_info(
+                    "Portainer is reachable but not initialized; falling back to direct Docker Compose deployment over SSH.",
+                    icon="⚠️",
+                )
+                used_remote_compose_fallback = True
+                token_valid = False
+            else:
+                raise
+        if not used_remote_compose_fallback and not token_valid:
             raise SystemExit(
                 "Portainer access token is invalid or expired. "
                 "Update PORTAINER_ACCESS_TOKEN in .env.deploy.secrets and retry. "
                 "If you intentionally want webhook-only deploys, remove PORTAINER_ACCESS_TOKEN."
             )
 
-    if has_portainer_api_auth:
+    if used_remote_compose_fallback:
+        log_step("Deploying stack directly with Docker Compose over SSH", icon="🐳")
+        _run(
+            build_ssh_cmd(
+                host=resolved_host,
+                remote_command=build_remote_compose_deploy_cmd(remote_dir=remote_dir, compose_files=compose_files),
+            ),
+            action="Failed direct Docker Compose deployment on the remote host",
+        )
+    elif has_portainer_api_auth:
         log_step("Deploying stack through Portainer API", icon="🌐")
         try:
             resolved_portainer_webhook_url = portainer_helpers.resolve_portainer_webhook_url_via_api(
-                host=resolved_host,
+                host=resolved_portainer_host,
                 https_port=resolved_portainer_https_port,
                 insecure=resolved_portainer_webhook_insecure,
                 stack_name=resolved_portainer_stack_name,
@@ -972,14 +1045,16 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             else:
                 raise
 
-    if has_portainer_api_auth and not resolved_portainer_webhook_url:
+    if used_remote_compose_fallback:
+        log_step("Stack deployed directly over SSH; skipping Portainer webhook trigger", icon="✅")
+    elif has_portainer_api_auth and not resolved_portainer_webhook_url:
         log_step("Stack deployed via Portainer API; webhook token not returned, skipping webhook trigger", icon="✅")
     else:
         webhook_urls = (
             [resolved_portainer_webhook_url]
             if resolved_portainer_webhook_url
             else portainer_helpers.build_portainer_webhook_urls_from_token(
-                host=resolved_host,
+                host=resolved_portainer_host,
                 https_port=resolved_portainer_https_port,
                 webhook_token=resolved_portainer_token,
             )

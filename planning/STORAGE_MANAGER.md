@@ -52,7 +52,7 @@ graph TB
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Language | **Python** | Aligns with project conventions (PEP 8, pytest, logging prefixes). |
-| Framework | **Flask** (lightweight) | Consistent with the existing stock-dashboard backend. |
+| Framework | **Flask** (lightweight) | Consistent with the repo's Python-based deploy tooling and pytest workflow. |
 | Scheduling | **APScheduler** | In-process, no external cron dependency. |
 | Registration | **REST API + Docker compose labels** | API for runtime registration; labels for static/boot-time discovery via Docker socket. |
 | Storage | **SQLite** (single-file, in a volume) | Persists registrations across restarts; no external DB needed. |
