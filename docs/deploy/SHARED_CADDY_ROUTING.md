@@ -1,5 +1,9 @@
 # Shared Caddy Routing 
 
+## Principles
+
+All public routes registered through the centralized Ubuntu Caddy proxy must inherit the same Caddy access gate before traffic is forwarded to an app container. Registration should be deterministic, idempotent, and safe to rerun: missing routes are appended, and stale unprotected routes are repaired instead of being silently treated as healthy.
+
 This guide explains how other projects deployed on the same Ubuntu server can register with the centralized Caddy proxy for automatic HTTPS routing — without needing their own sidecar proxies.
 
 ## How it works
@@ -12,6 +16,8 @@ Registration is **fully automated** by the `ubuntu_deploy.py` script.  All you n
 1. Prepare your project's `docker-compose.yml` (network + container name).
 2. Set the right env vars in `.env.deploy`.
 3. Run `ubuntu_deploy.py` — the Caddyfile is updated and Caddy reloaded for you.
+
+The generated site block includes the centralized proxy `basic_auth` guard using the existing `BASIC_AUTH_USER` and `BASIC_AUTH_HASH` placeholders. App-specific auth such as session login or API keys remains separate defense-in-depth behind that Caddy boundary.
 
 ## Step-by-step
 
@@ -67,7 +73,8 @@ The deploy script automatically:
 
 1. Reads the proxy Caddyfile on the remote host via SSH.
 2. Checks whether a site block for `PUBLIC_DOMAIN` already exists (idempotent).
-3. If missing, appends a site block with `reverse_proxy <service>:<port>`.
+3. If missing, appends a protected site block with `basic_auth` plus `reverse_proxy <service>:<port>`.
+4. If an existing domain block is present but unprotected, rewrites it with the standard `basic_auth` guard.
 4. Restarts the `central-proxy` container and validates the config.
 
 No manual SSH or Caddyfile editing required.
@@ -87,8 +94,23 @@ On the server, edit the Caddyfile (typically at `~/containers/protected-containe
 myapp.example.com {
     tls {$ACME_EMAIL}
     header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+
+  basic_auth /* {
+    {$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+  }
+
     reverse_proxy my-app-production:8080
 }
+```
+
+### Safe verification
+
+```bash
+# Unauthenticated requests must be blocked by Caddy.
+curl -I https://myapp.example.com
+
+# Authenticated requests may then reach the app, which can still apply its own login/API auth.
+curl -I -u "$BASIC_AUTH_USER:<your-known-password>" https://myapp.example.com
 ```
 
 ### Reload Caddy
