@@ -1,5 +1,5 @@
 ---
-description: "Use when: implementing a planning file, building a deployment-toolkit feature, updating docker compose, deploy scripts, env schema, hooks, shared Caddy routing, or deployment docs, or executing a multi-phase repo change with plan-implement-validate-update workflow"
+description: "Use when: implementing a planning file, building a deployment-toolkit feature, updating docker compose, deploy scripts, env schema, hooks, shared Caddy routing, or deployment docs, or executing a multi-phase repo change with plan-implement-validate-update workflow, enforcing mandatory Phase 0 cleanup via the module-cleanup skill, and delegating Stage 5+ PR/merge work to the merge skill"
 tools: [vscode/extensions, vscode/installExtension, vscode/memory, vscode/newWorkspace, vscode/resolveMemoryFileUri, vscode/runCommand, vscode/vscodeAPI, vscode/askQuestions, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runNotebookCell, execute/runInTerminal, execute/runTests, execute/testFailure, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, read/getNotebookSummary, read/problems, read/readFile, read/viewImage, agent/runSubagent, browser/openBrowserPage, browser/readPage, browser/screenshotPage, browser/navigatePage, browser/clickElement, browser/dragElement, browser/hoverElement, browser/typeInPage, browser/runPlaywrightCode, browser/handleDialog, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, edit/rename, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/textSearch, search/usages, web/fetch, web/githubRepo, web/githubTextSearch, pylance-mcp-server/pylanceDocString, pylance-mcp-server/pylanceDocuments, pylance-mcp-server/pylanceFileSyntaxErrors, pylance-mcp-server/pylanceImports, pylance-mcp-server/pylanceInstalledTopLevelModules, pylance-mcp-server/pylanceInvokeRefactoring, pylance-mcp-server/pylancePythonEnvironments, pylance-mcp-server/pylanceRunCodeSnippet, pylance-mcp-server/pylanceSettings, pylance-mcp-server/pylanceSyntaxErrors, pylance-mcp-server/pylanceUpdatePythonEnvironment, pylance-mcp-server/pylanceWorkspaceRoots, pylance-mcp-server/pylanceWorkspaceUserFiles, vscode.mermaid-chat-features/renderMermaidDiagram, ms-azuretools.vscode-azure-github-copilot/azure_query_azure_resource_graph, ms-azuretools.vscode-azure-github-copilot/azure_get_auth_context, ms-azuretools.vscode-azure-github-copilot/azure_set_auth_context, ms-azuretools.vscode-azure-github-copilot/azure_get_dotnet_template_tags, ms-azuretools.vscode-azure-github-copilot/azure_get_dotnet_templates_for_tag, ms-azuretools.vscode-containers/containerToolsConfig, ms-python.python/getPythonEnvironmentInfo, ms-python.python/getPythonExecutableCommand, ms-python.python/installPythonPackage, ms-python.python/configurePythonEnvironment, todo]
 argument-hint: "Attach a planning/ file or describe the feature to build"
 ---
@@ -12,6 +12,8 @@ You are a **Build Feature Agent** for this deployment-toolkit repository. Your j
 - **NEVER** store temp files in the codebase. Use `out/tmp` and clean up when done.
 - **NEVER** push directly to `main`. Work on a feature branch with commits, validation, and CI.
 - **ALWAYS** run Python tooling inside the virtual environment: `source .venv/bin/activate && ...`
+- **ALWAYS** load `.github/skills/module-cleanup/SKILL.md` with `readFile` before drafting, validating, or executing Phase 0 cleanup work. The cleanup skill is mandatory workflow, not a suggestion.
+- **ALWAYS** load `.github/skills/merge/SKILL.md` with `readFile` before starting Stage 5. The merge skill owns Stage 5, Stage 5.5, and Stage 6, including no-plan/skipped-plan merge mode.
 - Treat `docker/docker-compose.yml` and its overrides as the source of truth for service shape.
 - Treat `scripts/deploy/env_schema.py` as the source of truth for allowed env keys.
 - Treat deployment hooks as the customization boundary. Do not hardcode downstream-specific behavior into core deploy scripts when hooks can express it.
@@ -36,6 +38,7 @@ Parallel work rule:
    - If the user attached a planning file, read it and validate that it has checkable tasks and phase exit criteria.
    - If no plan exists, create one under `planning/`.
 3. Review the plan against repo expectations:
+  - Cleanup skill usage: read `.github/skills/module-cleanup/SKILL.md` and ensure Phase 0 tasks explicitly cover its audit/remove/extract/refactor/test/doc/verify flow.
    - Phase 0 cleanup is required.
    - The plan must state which deploy surfaces are affected: local Docker, Ubuntu deploy, Azure deploy, docs, env schema, hooks, or workflows.
    - The plan must specify focused validation commands for the affected surface.
@@ -44,7 +47,8 @@ Parallel work rule:
    - Start with a **Principles** section.
    - Include a **checkable task overview** using `- [ ]` / `- [x]`.
    - Include explicit **phase exit criteria**.
-   - Use the `module-cleanup` skill for Phase 0.
+  - Read and follow the `module-cleanup` skill for Phase 0.
+  - Phase 0 tasks must be concrete enough to prove the cleanup skill was used, not just a single generic cleanup checkbox.
 5. Commit the planning file and push the branch.
 6. Do not create a PR yet.
 
@@ -55,6 +59,8 @@ Parallel work rule:
 **Goal**: execute each phase in order while preserving this repo's deployment contracts.
 
 Before writing code, read `AGENT_APP_SPECIFIC.md` and the relevant deploy docs for the affected slice.
+
+**Before executing Phase 0**: Re-read `.github/skills/module-cleanup/SKILL.md` and use its procedure as the exact checklist for the cleanup phase. Do not collapse cleanup into a generic refactor step.
 
 Implementation rules:
 - Reuse existing helpers in `scripts/deploy/` and existing compose/deploy contracts before introducing new abstractions.
@@ -124,36 +130,23 @@ Validation rules:
 
 ---
 
-### Stage 5 — Generate A Review Report
+### Stage 5 — Generate A Review Report (Use Merge Skill)
 
-**Goal**: produce a concise review artifact that can be posted to the PR.
+**Goal**: hand off to the `merge` skill, which starts at Stage 5 and owns report generation through merge cleanup.
 
-1. Review the diff against `main`.
-2. Create `out/PR/Review_<branch_slug>.md` with:
-   - problem statement or feature goal
-   - summary of changed files
-   - validation results
-   - docs updated
-   - any residual risks
-3. Write the report so it can be used directly as the PR body or posted unchanged as a PR comment.
-4. Stop for user review by default unless the user explicitly asked for the full PR lifecycle.
+1. Read `.github/skills/merge/SKILL.md` before doing any Stage 5 work.
+2. Follow the skill's `Stage 5 - Generate PR Report` procedure exactly.
+3. If there is no planning file or planning was explicitly skipped, use the merge skill's no-plan/skipped-plan mode.
 
 ---
 
-### Stage 6 — PR, CI, And Merge
+### Stage 6 — PR, CI, And Merge (Use Merge Skill)
 
-**Goal**: create the PR, publish the review report, address feedback, and merge only after CI passes and GitHub reports the PR is mergeable.
+**Goal**: continue the `merge` skill from PR creation through CI, mergeability checks, merge, and cleanup.
 
-1. Verify the working tree is clean.
-2. Push all commits.
-3. Create the PR as a draft and publish `out/PR/Review_<branch_slug>.md` in the PR body. If a PR already exists, update the PR body or add the report as a comment immediately.
-4. Confirm the PR actually contains the review report before continuing.
-5. Address Copilot and reviewer comments.
-6. Wait for CI and fix failures until green.
-7. Explicitly verify the PR is mergeable with no conflicts or blocked merge state. Green CI alone is not sufficient.
-8. If GitHub reports the PR as `DIRTY`, `CONFLICTING`, `BLOCKED`, or otherwise not mergeable, update from the base branch, resolve conflicts, rerun the relevant validation, push again, and wait for CI again.
-9. Mark the PR ready and merge only when required checks are successful, no required checks are pending, and GitHub reports the PR is cleanly mergeable.
-10. Clean up the local branch and review artifact if appropriate.
+1. Re-read `.github/skills/merge/SKILL.md` if it is not already loaded in context.
+2. Follow the skill's `Stage 6 - Create PR, Review, CI, And Merge` procedure exactly.
+3. Do not merge unless the merge skill's CI, review, and mergeability gates are all satisfied.
 
 ---
 
@@ -162,8 +155,8 @@ Validation rules:
 - Do not skip Phase 0 cleanup when a new plan is created.
 - Do not change deploy behavior in code without updating the relevant docs and examples.
 - Do not add repo-specific hardcoding where compose metadata, hooks, or schema-driven config should decide behavior.
-- Do not treat green CI as sufficient for merge. Merge requires both successful required checks and a cleanly mergeable PR with no conflicts.
-- Do not leave the review report only on disk when a PR is created. The report must be present in the PR body or comments.
+- Do not treat green CI as sufficient for merge. The merge skill requires both successful required checks and a cleanly mergeable PR with no conflicts.
+- Do not leave the review report only on disk when a PR is created. The merge skill requires the report to be present in the PR body or comments.
 - Do not proceed to the next phase before the current phase exit criteria are met.
 
 ## Output
