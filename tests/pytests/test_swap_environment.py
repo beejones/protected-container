@@ -150,3 +150,43 @@ class TestSwapCaddyfileUpstreams:
                 production_domain="prod.example.com",
                 staging_domain="staging.example.com",
             )
+
+    def test_placeholder_public_domain_fallback(self) -> None:
+        """Caddyfile uses {$PUBLIC_DOMAIN} placeholder instead of literal domain."""
+        caddyfile = (
+            "{$PUBLIC_DOMAIN} {\n"
+            "    reverse_proxy app:3000\n"
+            "}\n"
+            "staging.example.com {\n"
+            "    reverse_proxy staging-app:3000\n"
+            "}\n"
+        )
+        new_caddyfile, prod_before, staging_before, prod_after, staging_after = swap_caddyfile_upstreams(
+            caddyfile,
+            production_domain="prod.example.com",
+            staging_domain="staging.example.com",
+        )
+        assert prod_before == "app:3000"
+        assert staging_before == "staging-app:3000"
+        assert prod_after == "staging-app:3000"
+        assert staging_after == "app:3000"
+
+    def test_placeholder_staging_domain_fallback(self) -> None:
+        """Caddyfile uses {$STAGING_PUBLIC_DOMAIN} placeholder."""
+        caddyfile = (
+            "prod.example.com {\n"
+            "    reverse_proxy app:3000\n"
+            "}\n"
+            "{$STAGING_PUBLIC_DOMAIN} {\n"
+            "    reverse_proxy staging-app:3000\n"
+            "}\n"
+        )
+        new_caddyfile, prod_before, staging_before, prod_after, staging_after = swap_caddyfile_upstreams(
+            caddyfile,
+            production_domain="prod.example.com",
+            staging_domain="staging.example.com",
+        )
+        assert prod_before == "app:3000"
+        assert staging_before == "staging-app:3000"
+        assert prod_after == "staging-app:3000"
+        assert staging_after == "app:3000"

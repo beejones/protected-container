@@ -130,7 +130,13 @@ def swap_caddyfile_upstreams(
     Raises ValueError if either domain block or upstream is not found.
     """
     prod_range = _find_site_block(caddyfile_text, production_domain)
+    # Fallback: Caddyfile may use {$PUBLIC_DOMAIN} placeholder instead of literal domain
+    if prod_range is None:
+        prod_range = _find_site_block(caddyfile_text, "{$PUBLIC_DOMAIN}")
     staging_range = _find_site_block(caddyfile_text, staging_domain)
+    # Fallback: Caddyfile may use {$STAGING_PUBLIC_DOMAIN} placeholder
+    if staging_range is None:
+        staging_range = _find_site_block(caddyfile_text, "{$STAGING_PUBLIC_DOMAIN}")
 
     if prod_range is None:
         raise ValueError(f"Production domain '{production_domain}' not found in Caddyfile")
