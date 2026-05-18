@@ -230,6 +230,28 @@ def build_remote_compose_start_cmd(*, remote_dir: Path, compose_files: list[str]
     )
 
 
+def build_remote_compose_require_containers_cmd(*, remote_dir: Path, compose_files: list[str]) -> str:
+    """Build a remote command that fails when a compose project has no containers."""
+    quoted_remote_dir = shlex.quote(str(remote_dir))
+    compose_args = " ".join(f"-f {shlex.quote(str(compose_file))}" for compose_file in compose_files)
+    return (
+        f"cd {quoted_remote_dir} && "
+        f"export ENV_DIR={quoted_remote_dir} && "
+        "if docker compose version >/dev/null 2>&1; then "
+        f"container_ids=$(docker compose {compose_args} ps -a -q); "
+        "elif command -v docker-compose >/dev/null 2>&1; then "
+        f"container_ids=$(docker-compose {compose_args} ps -a -q); "
+        "else "
+        "echo '[ubuntu-deploy] Docker Compose is not installed on the remote host.' >&2; "
+        "exit 1; "
+        "fi; "
+        "if [ -z \"$container_ids\" ]; then "
+        "echo '[ubuntu-deploy] Staging containers have not been created; run staging deploy before start/swap.' >&2; "
+        "exit 1; "
+        "fi"
+    )
+
+
 def _should_fallback_to_remote_compose(error_text: str) -> bool:
     lowered = str(error_text).lower()
     return "administrator initialization timeout" in lowered
@@ -777,6 +799,22 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         log_info(f"Production domain: {prod_domain}")
         log_info(f"Staging domain: {staging_domain}")
 
+        log_step("Verifying staging containers exist", icon="🔎")
+        log_info(f"Remote dir: {staging_remote_dir}")
+        _run(
+            build_ssh_cmd(
+                host=resolved_host,
+                remote_command=build_remote_compose_require_containers_cmd(
+                    remote_dir=staging_remote_dir,
+                    compose_files=swap_compose_files,
+                ),
+            ),
+            action=(
+                "Staging containers are not ready for swap. "
+                "Run `source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py` first"
+            ),
+        )
+
         # Step: Stop production containers
         log_step("Stopping production containers", icon="⏹️")
         log_info(f"Remote dir: {prod_remote_dir}")
@@ -791,13 +829,24 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         # Step: Start staging containers
         log_step("Starting staging containers", icon="▶️")
         log_info(f"Remote dir: {staging_remote_dir}")
-        _run(
-            build_ssh_cmd(
-                host=resolved_host,
-                remote_command=build_remote_compose_start_cmd(remote_dir=staging_remote_dir, compose_files=swap_compose_files),
-            ),
-            action="Failed to start staging containers",
-        )
+        try:
+            _run(
+                build_ssh_cmd(
+                    host=resolved_host,
+                    remote_command=build_remote_compose_start_cmd(remote_dir=staging_remote_dir, compose_files=swap_compose_files),
+                ),
+                action="Failed to start staging containers",
+            )
+        except SystemExit:
+            log_info("Starting staging failed — restarting production containers", icon="⚠️")
+            _run(
+                build_ssh_cmd(
+                    host=resolved_host,
+                    remote_command=build_remote_compose_start_cmd(remote_dir=prod_remote_dir, compose_files=swap_compose_files),
+                ),
+                action="Failed to restart production containers after staging start failure",
+            )
+            raise
 
         # Step: Swap Caddy routing
         log_step("Swapping Caddy routing", icon="🔀")

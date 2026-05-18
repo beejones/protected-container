@@ -1,4 +1,7 @@
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from scripts.deploy.ubuntu_deploy import (
     _coerce_label_value,
@@ -19,6 +22,7 @@ from scripts.deploy.ubuntu_deploy import (
     resolve_network_host_from_ssh_target,
     rewrite_rendered_paths_for_remote,
     stack_has_service,
+    main,
     read_deploy_key,
     read_deploy_secret_key,
     read_dotenv_key,
@@ -104,6 +108,62 @@ def test_should_fallback_to_remote_compose_on_portainer_init_timeout():
         "Portainer /api/endpoints returned an unexpected payload: Administrator initialization timeout"
     ) is True
     assert _should_fallback_to_remote_compose("Portainer access token was rejected") is False
+
+
+def test_swap_fails_before_stopping_production_when_staging_containers_missing(tmp_path, monkeypatch):
+    (tmp_path / ".env.deploy").write_text(
+        "\n".join(
+            [
+                "UBUNTU_SSH_HOST=deploy@example.com",
+                "PUBLIC_DOMAIN=prod.example.com",
+                "STAGING_PUBLIC_DOMAIN=staging.example.com",
+                "UBUNTU_REMOTE_DIR=/srv/prod",
+                "STAGING_REMOTE_DIR=/srv/staging",
+            ]
+        )
+        + "\n"
+    )
+
+    for key in [
+        "UBUNTU_SSH_HOST",
+        "PUBLIC_DOMAIN",
+        "STAGING_PUBLIC_DOMAIN",
+        "UBUNTU_REMOTE_DIR",
+        "STAGING_REMOTE_DIR",
+        "UBUNTU_COMPOSE_FILES",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+
+    ssh_commands: list[str] = []
+
+    class DummyResult:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, *args, **kwargs):
+        if cmd == ["ssh", "-G", "deploy@example.com"]:
+            return DummyResult()
+
+        if isinstance(cmd, list) and cmd and cmd[0] == "ssh":
+            remote_command = str(cmd[-1])
+            ssh_commands.append(remote_command)
+            if "/srv/staging" in remote_command and "ps -a -q" in remote_command:
+                raise subprocess.CalledProcessError(
+                    1,
+                    cmd,
+                    stderr="staging containers have not been created",
+                )
+            return DummyResult()
+
+        return DummyResult()
+
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.subprocess.run", fake_run)
+
+    with pytest.raises(SystemExit):
+        main(["--swap"], repo_root_override=tmp_path)
+
+    assert not any("cd /srv/prod" in cmd and " stop;" in cmd for cmd in ssh_commands)
 
 
 def test_resolve_network_host_from_ssh_target_uses_ssh_g(monkeypatch):
