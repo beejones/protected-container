@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import shlex
+from typing import Literal
+
 import requests
 
 def _extract_webhook_token(payload: object) -> str:
@@ -38,6 +40,172 @@ def _format_portainer_api_error(payload: object) -> str:
     if message and details and details != message:
         return f"{message}: {details}"
     return message or details
+
+
+def _portainer_base_url(*, host: str, https_port: int) -> str:
+    hostname = extract_ssh_hostname(host).strip()
+    return f"https://{hostname}:{https_port}"
+
+
+def resolve_portainer_endpoint_id(
+    *,
+    host: str,
+    https_port: int,
+    insecure: bool,
+    endpoint_id: str,
+    access_token: str,
+) -> str:
+    """Resolve the Portainer endpoint id, preferring the configured value."""
+    desired_endpoint = endpoint_id.strip()
+    if desired_endpoint:
+        return desired_endpoint
+
+    headers = _portainer_auth_headers(access_token=access_token)
+    if not headers:
+        raise SystemExit("PORTAINER_ACCESS_TOKEN is required to resolve Portainer endpoint id")
+
+    base_url = _portainer_base_url(host=host, https_port=https_port)
+    endpoints_resp = requests.get(f"{base_url}/api/endpoints", headers=headers, verify=not insecure, timeout=20)
+    endpoints_resp.raise_for_status()
+    endpoints_payload = endpoints_resp.json()
+    if not isinstance(endpoints_payload, list) or not endpoints_payload:
+        error_text = _format_portainer_api_error(endpoints_payload)
+        if error_text:
+            raise SystemExit(f"Portainer /api/endpoints returned an unexpected payload: {error_text}")
+        raise SystemExit("No Portainer endpoints found")
+
+    for endpoint in endpoints_payload:
+        if not isinstance(endpoint, dict):
+            continue
+        endpoint_name = str(endpoint.get("Name") or endpoint.get("name") or "").strip().lower()
+        endpoint_url = str(endpoint.get("URL") or endpoint.get("url") or "").strip().lower()
+        if endpoint_name == "local" or endpoint_url.startswith("unix://"):
+            local_endpoint_id = str(endpoint.get("Id") or endpoint.get("id") or "").strip()
+            if local_endpoint_id:
+                return local_endpoint_id
+
+    first_endpoint = endpoints_payload[0]
+    if isinstance(first_endpoint, dict):
+        first_endpoint_id = str(first_endpoint.get("Id") or first_endpoint.get("id") or "").strip()
+        if first_endpoint_id:
+            return first_endpoint_id
+
+    raise SystemExit("Unable to determine Portainer endpoint id; set PORTAINER_ENDPOINT_ID")
+
+
+def _container_belongs_to_stack(container_payload: object, stack_name: str) -> bool:
+    if not isinstance(container_payload, dict):
+        return False
+    labels = container_payload.get("Labels") or container_payload.get("labels") or {}
+    if not isinstance(labels, dict):
+        labels = {}
+
+    label_values = {
+        str(labels.get("com.docker.compose.project") or "").strip(),
+        str(labels.get("com.docker.stack.namespace") or "").strip(),
+        str(labels.get("io.portainer.stack.name") or "").strip(),
+    }
+    if stack_name in label_values:
+        return True
+
+    names = container_payload.get("Names") or container_payload.get("names") or []
+    if isinstance(names, list):
+        normalized_names = [str(name).strip().lstrip("/") for name in names]
+        return any(name == stack_name or name.startswith(f"{stack_name}-") or name.startswith(f"{stack_name}_") for name in normalized_names)
+
+    return False
+
+
+def list_portainer_stack_containers(
+    *,
+    host: str,
+    https_port: int,
+    insecure: bool,
+    endpoint_id: str,
+    access_token: str,
+    stack_name: str,
+) -> list[dict[str, object]]:
+    """List containers belonging to a Portainer stack via Docker proxy API."""
+    resolved_endpoint_id = resolve_portainer_endpoint_id(
+        host=host,
+        https_port=https_port,
+        insecure=insecure,
+        endpoint_id=endpoint_id,
+        access_token=access_token,
+    )
+    headers = _portainer_auth_headers(access_token=access_token)
+    base_url = _portainer_base_url(host=host, https_port=https_port)
+    resp = requests.get(
+        f"{base_url}/api/endpoints/{resolved_endpoint_id}/docker/containers/json",
+        headers=headers,
+        params={"all": "true"},
+        verify=not insecure,
+        timeout=20,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    if not isinstance(payload, list):
+        error_text = _format_portainer_api_error(payload)
+        if error_text:
+            raise SystemExit(f"Portainer Docker container list returned an unexpected payload: {error_text}")
+        raise SystemExit("Unexpected Portainer Docker container list response format")
+
+    return [container for container in payload if _container_belongs_to_stack(container, stack_name)]
+
+
+def set_portainer_stack_containers_state(
+    *,
+    host: str,
+    https_port: int,
+    insecure: bool,
+    endpoint_id: str,
+    access_token: str,
+    stack_name: str,
+    action: Literal["start", "stop"],
+) -> list[str]:
+    """Start or stop all containers belonging to a Portainer stack."""
+    containers = list_portainer_stack_containers(
+        host=host,
+        https_port=https_port,
+        insecure=insecure,
+        endpoint_id=endpoint_id,
+        access_token=access_token,
+        stack_name=stack_name,
+    )
+    if not containers:
+        raise SystemExit(f"No containers found for Portainer stack '{stack_name}'")
+
+    resolved_endpoint_id = resolve_portainer_endpoint_id(
+        host=host,
+        https_port=https_port,
+        insecure=insecure,
+        endpoint_id=endpoint_id,
+        access_token=access_token,
+    )
+    headers = _portainer_auth_headers(access_token=access_token)
+    base_url = _portainer_base_url(host=host, https_port=https_port)
+    names: list[str] = []
+
+    for container in containers:
+        container_id = str(container.get("Id") or container.get("ID") or "").strip()
+        if not container_id:
+            continue
+        raw_names = container.get("Names") or []
+        name = container_id[:12]
+        if isinstance(raw_names, list) and raw_names:
+            name = str(raw_names[0]).strip().lstrip("/") or name
+        names.append(name)
+        response = requests.post(
+            f"{base_url}/api/endpoints/{resolved_endpoint_id}/docker/containers/{container_id}/{action}",
+            headers=headers,
+            verify=not insecure,
+            timeout=20,
+        )
+        if int(response.status_code) not in {204, 304}:
+            details = str(response.text or "").strip().replace("\n", " ")[:300]
+            raise SystemExit(f"Failed to {action} container {name}: {response.status_code} {details}")
+
+    return names
 
 
 def extract_ssh_hostname(host: str) -> str:

@@ -117,3 +117,7 @@ Common issues:
 
 If you have additional services on the same server that need HTTPS routing through the centralized proxy, see [Shared Caddy Routing](SHARED_CADDY_ROUTING.md).
 
+## Staging and Production Promotion
+
+For predeploying staging as stopped containers, promoting that staged build into the production stack with `--swap`, and keeping `PUBLIC_DOMAIN` routed to production, see [Staging Environment](STAGING.md).
+
