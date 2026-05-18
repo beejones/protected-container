@@ -15,7 +15,7 @@
   | `stack_name` | Portainer stack name | Which stack was deployed |
   | `domain` | Public domain for this deploy | Which URL serves this release |
   | `image` | `ghcr.io/.../...:latest` | Exact container image deployed |
-  | `status` | `success` / `failed` | Outcome | 
+  | `status` | `success` / `failed` | Outcome |
 - **Staging mirrors production contract**: Staging uses the same Compose files, hooks, and deploy script as production — only the target parameters differ (domain, remote dir, stack name).
 - **Portainer manages both stacks**: Staging is a second Portainer stack on the same host (e.g. `protected-container-staging`). Portainer UI shows both stacks side-by-side. The deploy script creates/updates the staging stack via the same Portainer API path — just with different `PORTAINER_STACK_NAME` and `UBUNTU_REMOTE_DIR`. You can also inspect, restart, or roll back individual stacks directly from the Portainer web UI.
 - **Swap is a production promotion operation**: `--swap` promotes the staged build into the production stack, keeps `PUBLIC_DOMAIN` routed to production, and stops staging afterward.
@@ -28,9 +28,9 @@
   4. Stops staging containers via Portainer API
   5. Keeps Caddy routing on `PUBLIC_DOMAIN` → production stack
   6. Logs a `swap` event to the deploy CSV without incrementing `APP_VERSION`
-  
+
   **Why not route production to staging?** Staging must remain stopped after deploy and after swap. Promoting into production preserves the stable public route while keeping staging as a stopped predeploy candidate.
-  
+
   **Rollback**: Use the deploy-log `git_ref`, checkout that commit, and redeploy production.
 - **Existing deploy contracts preserved**: ubuntu_deploy.py remains the single entry point; staging vs production is a parameter concern.
 
