@@ -20,8 +20,9 @@
 - **Portainer manages both stacks**: Staging is a second Portainer stack on the same host (e.g. `protected-container-staging`). Portainer UI shows both stacks side-by-side. The deploy script creates/updates the staging stack via the same Portainer API path — just with different `PORTAINER_STACK_NAME` and `UBUNTU_REMOTE_DIR`. You can also inspect, restart, or roll back individual stacks directly from the Portainer web UI.
 - **Swap is a traffic operation, not a re-deploy**: Switching between staging and production is a Caddy routing change, not a container rebuild.
 - **No hardcoded staging logic in core scripts**: Staging is expressed through env profiles and a lightweight swap utility, not a parallel deploy code path.
-- **Swap is a script operation on Caddy routing** (not Portainer):
-  1. Run `python scripts/deploy/swap_environment.py` (or `ubuntu_deploy.py --swap`)
+- **Default deploy target is staging**: Running `ubuntu_deploy.py` without flags deploys to **staging**. To deploy directly to production, pass `--prod`. This prevents accidental production deploys.
+- **Swap is `ubuntu_deploy.py --swap`** (Caddy routing operation, not Portainer):
+  1. Run `python scripts/deploy/ubuntu_deploy.py --swap`
   2. Script SSHs into the host, verifies both stacks are healthy via `docker ps`
   3. Rewrites the Caddyfile: production domain → staging container upstream, staging domain → production container upstream
   4. Reloads Caddy (`docker exec central-proxy caddy reload`)
@@ -72,24 +73,26 @@
 
 ### Phase 2 — Staging Environment Support
 - [ ] Add optional env keys to `env_schema.py`:
-  - `DEPLOY_ENV` — value `production` or `staging` (default: `production`)
   - `STAGING_PUBLIC_DOMAIN` — staging domain
   - `STAGING_REMOTE_DIR` — staging remote directory
   - `STAGING_PORTAINER_STACK_NAME` — staging stack name
-- [ ] Add `--env` / `--deploy-env` CLI flag to `ubuntu_deploy.py` (values: `production`, `staging`)
-  - When `staging`: override `PUBLIC_DOMAIN`, `UBUNTU_REMOTE_DIR`, `PORTAINER_STACK_NAME` with staging equivalents
-  - All other resolution logic unchanged
+- [ ] Change `ubuntu_deploy.py` default behavior:
+  - **Default (no flag)**: deploy to staging (uses `STAGING_*` env keys)
+  - **`--prod` flag**: deploy to production (uses existing `PUBLIC_DOMAIN`, `UBUNTU_REMOTE_DIR`, `PORTAINER_STACK_NAME`)
+  - **`--swap` flag**: swap Caddy routing between staging and production (no deploy, just traffic switch)
+  - Mutually exclusive: `--prod` and `--swap` cannot be combined
 - [ ] Update `env.deploy.example` with commented staging examples
-- [ ] Include `DEPLOY_ENV` value in the CSV log `target` column
+- [ ] Include target (`staging` / `production`) in the CSV log `target` column
 
-### Phase 3 — Environment Swap Utility
-- [ ] Create `scripts/deploy/swap_environment.py`:
-  - Reads current Caddy routing for both production and staging domains
-  - Swaps the upstream targets: production domain → staging container, staging domain → production container
-  - Uses `caddy_register.py` helpers over SSH to rewrite Caddyfile entries
-  - Validates both services are healthy before swapping (docker ps check over SSH)
+### Phase 3 — Swap via `--swap` Flag
+- [ ] Implement `--swap` handler in `ubuntu_deploy.py`:
+  - SSHs into host, checks both prod and staging containers are healthy (`docker ps`)
+  - Reads current Caddy upstream mappings for both domains
+  - Rewrites Caddyfile: production domain → staging container, staging domain → production container
+  - Reloads Caddy (`docker exec central-proxy caddy reload`)
   - Appends a `swap` event to the deploy CSV
-- [ ] Add `--swap` flag or sub-command to `ubuntu_deploy.py` as a convenience alias
+  - Fails clearly if either stack is unhealthy
+- [ ] Extract swap logic into a helper function (testable without CLI)
 - [ ] Write integration tests for swap logic (mock SSH + Caddy register calls)
 
 ### Phase 4 — Documentation
@@ -104,8 +107,8 @@
 
 ### Phase 5 — Validation
 - [ ] All new and existing tests pass (`pytest`)
-- [ ] `ubuntu_deploy.py --help` shows new `--deploy-env` flag
-- [ ] `swap_environment.py --help` runs without error
+- [ ] `ubuntu_deploy.py --help` shows `--prod` and `--swap` flags
+- [ ] `ubuntu_deploy.py --swap --prod` errors with mutual exclusion message
 - [ ] `validate_env.py` passes with and without staging keys set
 - [ ] CSV file is created correctly after a dry-run or mocked deploy
 
