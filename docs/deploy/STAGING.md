@@ -120,12 +120,17 @@ Projects that use this toolkit as their deployment base inherit staging support 
    STAGING_PORTAINER_STACK_NAME=myapp-staging
    ```
 
-3. **Deploy to staging** (default — no extra flags):
+3. **Add APP_VERSION=0.2.1 to `.env`**:
+   ```bash
+   APP_VERSION=0.2.1
+   ```
+
+4. **Deploy to staging** (default — no extra flags):
    ```bash
    source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py
    ```
 
-4. **Verify staging works**, then swap traffic:
+5. **Verify staging works**, then swap traffic:
    ```bash
    source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py --swap
    ```
