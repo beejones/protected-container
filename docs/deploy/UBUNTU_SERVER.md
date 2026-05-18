@@ -117,3 +117,7 @@ Common issues:
 
 If you have additional services on the same server that need HTTPS routing through the centralized proxy, see [Shared Caddy Routing](SHARED_CADDY_ROUTING.md).
 
+## Staging and Production Swap
+
+For running staging and production side-by-side on the same host with zero-downtime traffic swaps, see [Staging Environment](STAGING.md).
+
