@@ -37,7 +37,7 @@ Add these keys to `.env.deploy`:
 PUBLIC_DOMAIN=your-app.example.com
 
 # Staging environment
-STAGING_PUBLIC_DOMAIN=staging.your-app.example.com
+STAGING_PUBLIC_DOMAIN=staging_your-app.example.com
 STAGING_REMOTE_DIR=/home/your-user/containers/protected-container-staging
 STAGING_PORTAINER_STACK_NAME=protected-container-staging
 ```
