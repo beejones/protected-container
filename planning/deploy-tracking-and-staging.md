@@ -178,47 +178,55 @@ This is a **zero-downtime traffic swap** — no containers are restarted. Rollba
 
 ### Problem
 
-After a swap, Caddy routes change but containers and their volumes do NOT move:
-- Production domain → staging containers (with **staging volumes**)
-- Staging domain → production containers (with **production volumes**)
+After a Caddy-only swap, containers and their volumes do NOT move. This means the staging container has different (potentially empty) volumes from production. We need staging to use production data so it can be validated with real state.
 
-This creates two risks:
-1. **Data loss**: Production traffic writes to staging's volume. If staging volumes are smaller, ephemeral, or subject to aggressive cleanup, production data could be lost.
-2. **Storage-manager cleanup**: If storage-manager cleanup rules are running on the "now demoted" production containers (which still have production volumes), those cleanup algorithms could delete production data.
+### Revised Design: Shared Volumes + Container Start/Stop
 
-### Design Constraints
+Instead of two independent stacks with separate volumes, staging and production share the same volumes. Only one stack is running at a time. The swap is a **container lifecycle operation** (stop one, start the other) combined with a Caddy routing change.
 
-- Volumes are named by stack/compose project. Production stack has `protected-container_*` volumes; staging has `protected-container-staging_*` volumes.
-- Storage-manager labels declare cleanup policy per service. After swap, the labels stay with the container — they don't follow the traffic.
-- The swap is purely a Caddy routing change. Containers, mounts, and labels are unchanged.
+**How it works:**
 
-### Required Behavior
+1. **Default deploy (staging)**: Deploy the staging stack to the same remote dir, referencing the **production volumes**. Do NOT start the staging containers. This allows the staging image/code to be ready without serving traffic or touching data.
 
-1. **Before swap**: The swap script should verify that staging volumes contain a compatible data state (or are empty/disposable). This is the operator's responsibility, but the script should warn.
-2. **After swap**: The storage-manager cleanup on the newly-demoted stack (old production containers now receiving staging traffic) should be paused or its retention policy should be extended to avoid premature cleanup.
-3. **Volume promotion strategy**: If production data must persist after swap, the recommended approach is:
-   - Deploy to staging (new code, fresh volumes or copied data)
-   - Verify staging works
-   - Swap traffic (zero-downtime)
-   - The old production containers (now on staging domain) retain their volumes intact as a rollback safety net
-   - Only after confirming the swap is stable, optionally prune old volumes
+2. **`--prod`**: Start the production containers (if not already running). If the staging containers are running, stop them first. Production serves traffic on the production domain.
+
+3. **`--swap`**: Stop the production containers, start the staging containers (which use the same volumes), then swap Caddy routing so the production domain points to the staging containers. The staging containers now serve production traffic with production data.
+
+### Architecture After Swap
+
+```
+Before swap:
+  prod domain  → prod containers (running, prod volumes)
+  staging containers (stopped, same prod volumes)
+
+After swap:
+  prod domain  → staging containers (running, prod volumes)  
+  prod containers (stopped, same prod volumes)
+```
+
+### Key Differences From Previous Design
+
+| Aspect | Previous (separate volumes) | New (shared volumes) |
+|--------|---------------------------|---------------------|
+| Volumes | Stack-scoped, separate | Shared — staging uses prod volumes |
+| Staging state | Independent data | Real production data |
+| Swap | Caddy-only routing | Stop prod + start staging + Caddy swap |
+| Rollback | Swap again (instant) | Stop staging + start prod + Caddy swap |
+| Risk during swap | Brief downtime during container stop/start | Same |
+| Storage-manager | No concern (separate volumes) | Only one set of containers runs cleanup |
 
 ### Checkable Tasks
 
-- [ ] Add `--swap` pre-flight warning: "After swap, production traffic will use staging container volumes. Ensure staging data state is ready."
-- [ ] Add `--swap --confirm` flag to suppress the warning (for automation)
-- [ ] Document volume behavior in `docs/deploy/STAGING.md`: which volumes stay where after swap
-- [ ] Investigate storage-manager pause mechanism:
-  - Option A: Set a `storage-manager.pause=true` label on the demoted stack after swap
-  - Option B: Temporarily increase retention on demoted stack via API call
-  - Option C: Do nothing — cleanup only runs on labeled volumes and staging volumes are separate from production volumes (simplest if volume names are stack-scoped)
-- [ ] Decide whether to support volume migration (copy prod volumes → staging before swap) or document it as an operator responsibility
-- [ ] Add deploy message improvements: show target environment and version in "Prepared deployment plan" and "Done" messages
-
-### Resolution Note
-
-If production and staging stacks use **separate Docker volumes** (scoped by compose project name), then after a swap:
-- Production data stays in `protected-container_*` volumes attached to prod containers (now receiving staging traffic)
-- Staging data stays in `protected-container-staging_*` volumes attached to staging containers (now receiving production traffic)
-
-In this case, storage-manager cleanup is safe because it operates on the volume names it was configured for — not on the traffic the container happens to receive. **No special pause is needed if volumes are stack-scoped.** The key question is whether the staging container has enough data/state to serve production traffic.
+- [ ] Modify staging deploy to mount production volumes (same volume names in compose)
+- [ ] Staging deploy should NOT start containers (`docker compose up --no-start` or equivalent via Portainer)
+- [ ] `--prod` should start prod containers and stop staging containers if running
+- [ ] `--swap` should:
+  1. Stop production containers
+  2. Start staging containers (same volumes)
+  3. Swap Caddy routing (production domain → staging containers)
+  4. Log swap event to CSV
+- [ ] Rollback (`--swap` again) reverses: stop staging, start prod, swap Caddy back
+- [ ] Storage-manager only runs on the active stack — no cleanup conflict
+- [ ] Update `docs/deploy/STAGING.md` with the shared-volume model
+- [ ] Add deploy message: show which containers are being stopped/started
+- [ ] Tests for stop/start lifecycle logic
