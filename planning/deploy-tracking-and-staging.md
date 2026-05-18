@@ -217,19 +217,19 @@ After swap:
 
 ### Checkable Tasks
 
-- [ ] Modify staging deploy to mount production volumes (same volume names in compose)
-- [ ] Staging deploy should NOT start containers (`docker compose up --no-start` or equivalent via Portainer)
-- [ ] `--prod` should start prod containers and stop staging containers if running
-- [ ] `--swap` should:
+- [x] Modify staging deploy to mount production volumes (same volume names in compose)
+- [x] Staging deploy should NOT start containers (`docker compose up --no-start` or equivalent via Portainer)
+- [x] `--prod` should start prod containers and stop staging containers if running
+- [x] `--swap` should:
   1. Stop production containers
   2. Start staging containers (same volumes)
   3. Swap Caddy routing (production domain → staging containers)
   4. Log swap event to CSV
-- [ ] Rollback (`--swap` again) reverses: stop staging, start prod, swap Caddy back
-- [ ] Storage-manager only runs on the active stack — no cleanup conflict
-- [ ] Update `docs/deploy/STAGING.md` with the shared-volume model
-- [ ] Add deploy message: show which containers are being stopped/started
-- [ ] Tests for stop/start lifecycle logic
+- [x] Rollback (`--swap` again) reverses: stop staging, start prod, swap Caddy back
+- [x] Storage-manager only runs on the active stack — no cleanup conflict
+- [x] Update `docs/deploy/STAGING.md` with the shared-volume model
+- [x] Add deploy message: show which containers are being stopped/started
+- [x] Tests for stop/start lifecycle logic
 
 ---
 
