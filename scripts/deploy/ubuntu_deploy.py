@@ -58,6 +58,9 @@ ENV_CADDY_PROXY_DIR = "CADDY_PROXY_DIR"
 ENV_STORAGE_MANAGER_API_URL = "STORAGE_MANAGER_API_URL"
 ENV_DEPLOY_HOOKS_MODULE = "DEPLOY_HOOKS_MODULE"
 ENV_DEPLOY_HOOKS_SOFT_FAIL = "DEPLOY_HOOKS_SOFT_FAIL"
+ENV_STAGING_PUBLIC_DOMAIN = "STAGING_PUBLIC_DOMAIN"
+ENV_STAGING_REMOTE_DIR = "STAGING_REMOTE_DIR"
+ENV_STAGING_PORTAINER_STACK_NAME = "STAGING_PORTAINER_STACK_NAME"
 
 
 _STORAGE_MANAGER_LABEL_PATTERN = re.compile(r"^storage-manager\.(\d+)\.(.+)$")
@@ -613,8 +616,23 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             "Resolution: CLI -> STORAGE_MANAGER_API_URL env var -> .env.deploy"
         ),
     )
+    parser.add_argument(
+        "--prod",
+        action="store_true",
+        help="Deploy to production (uses PUBLIC_DOMAIN, UBUNTU_REMOTE_DIR, PORTAINER_STACK_NAME). Default is staging.",
+    )
+    parser.add_argument(
+        "--swap",
+        action="store_true",
+        help="Swap Caddy routing between staging and production (no deploy, just traffic switch).",
+    )
 
     args = parser.parse_args(argv)
+
+    if args.prod and args.swap:
+        parser.error("--prod and --swap are mutually exclusive")
+
+    deploy_target = "swap" if args.swap else ("production" if args.prod else "staging")
 
     step_number = 0
     step_color = "\033[95m"
@@ -653,9 +671,15 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
     resolved_remote_dir = str(args.remote_dir or "").strip()
     if not resolved_remote_dir:
-        resolved_remote_dir = str(os.getenv(ENV_UBUNTU_REMOTE_DIR) or "").strip()
-    if not resolved_remote_dir:
-        resolved_remote_dir = read_deploy_key(repo_root=repo_root, key=ENV_UBUNTU_REMOTE_DIR)
+        # Staging overrides: use STAGING_REMOTE_DIR when deploying to staging
+        if deploy_target == "staging":
+            resolved_remote_dir = str(os.getenv(ENV_STAGING_REMOTE_DIR) or "").strip()
+            if not resolved_remote_dir:
+                resolved_remote_dir = read_deploy_key(repo_root=repo_root, key=ENV_STAGING_REMOTE_DIR)
+        if not resolved_remote_dir:
+            resolved_remote_dir = str(os.getenv(ENV_UBUNTU_REMOTE_DIR) or "").strip()
+        if not resolved_remote_dir:
+            resolved_remote_dir = read_deploy_key(repo_root=repo_root, key=ENV_UBUNTU_REMOTE_DIR)
     if not resolved_remote_dir:
         resolved_remote_dir = "/opt/protected-container"
     remote_dir = Path(resolved_remote_dir)
@@ -737,7 +761,13 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     if not resolved_portainer_access_token:
         resolved_portainer_access_token = read_deploy_secret_key(repo_root=repo_root, key=ENV_PORTAINER_ACCESS_TOKEN)
 
-    resolved_portainer_stack_name = str(os.getenv(ENV_PORTAINER_STACK_NAME) or "").strip()
+    resolved_portainer_stack_name = ""
+    if deploy_target == "staging":
+        resolved_portainer_stack_name = str(os.getenv(ENV_STAGING_PORTAINER_STACK_NAME) or "").strip()
+        if not resolved_portainer_stack_name:
+            resolved_portainer_stack_name = read_deploy_key(repo_root=repo_root, key=ENV_STAGING_PORTAINER_STACK_NAME)
+    if not resolved_portainer_stack_name:
+        resolved_portainer_stack_name = str(os.getenv(ENV_PORTAINER_STACK_NAME) or "").strip()
     if not resolved_portainer_stack_name:
         resolved_portainer_stack_name = read_deploy_key(repo_root=repo_root, key=ENV_PORTAINER_STACK_NAME)
     if not resolved_portainer_stack_name:
@@ -1069,7 +1099,13 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         )
 
     # --- Post-deploy: register with centralized Caddy proxy ----------------
-    resolved_public_domain = str(os.getenv(ENV_PUBLIC_DOMAIN) or "").strip()
+    resolved_public_domain = ""
+    if deploy_target == "staging":
+        resolved_public_domain = str(os.getenv(ENV_STAGING_PUBLIC_DOMAIN) or "").strip()
+        if not resolved_public_domain:
+            resolved_public_domain = read_deploy_key(repo_root=repo_root, key=ENV_STAGING_PUBLIC_DOMAIN)
+    if not resolved_public_domain:
+        resolved_public_domain = str(os.getenv(ENV_PUBLIC_DOMAIN) or "").strip()
     if not resolved_public_domain:
         resolved_public_domain = read_deploy_key(repo_root=repo_root, key=ENV_PUBLIC_DOMAIN)
 
@@ -1168,7 +1204,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     # --- Deploy tracking CSV ------------------------------------------------
     deploy_log.append_deploy_record(
         repo_root=repo_root,
-        target="production",
+        target=deploy_target,
         stack_name=resolved_portainer_stack_name,
         domain=resolved_public_domain,
         image=resolved_app_image,

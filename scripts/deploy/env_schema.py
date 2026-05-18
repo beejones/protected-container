@@ -77,6 +77,11 @@ class VarsEnum(str, Enum):
     OTHER_CPU_CORES = "OTHER_CPU_CORES"
     OTHER_MEMORY_GB = "OTHER_MEMORY_GB"
 
+    # Staging
+    STAGING_PUBLIC_DOMAIN = "STAGING_PUBLIC_DOMAIN"
+    STAGING_REMOTE_DIR = "STAGING_REMOTE_DIR"
+    STAGING_PORTAINER_STACK_NAME = "STAGING_PORTAINER_STACK_NAME"
+
     # Runtime
     BASIC_AUTH_USER = "BASIC_AUTH_USER"
     APP_VERSION = "APP_VERSION"
@@ -332,6 +337,25 @@ DEPLOY_SCHEMA: tuple[EnvKeySpec, ...] = (
         key=SecretsEnum.BASIC_AUTH_HASH,
         mandatory=False,
         targets=frozenset({EnvTarget.GH_ACTIONS_SECRET}),
+    ),
+    # Staging (optional)
+    EnvKeySpec(
+        key=VarsEnum.STAGING_PUBLIC_DOMAIN,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.STAGING_REMOTE_DIR,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.STAGING_PORTAINER_STACK_NAME,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY}),
     ),
     # GitHub Actions expects this secret to exist to materialize `.env` in CI.
     EnvKeySpec(
