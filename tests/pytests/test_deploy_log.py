@@ -160,7 +160,14 @@ class TestAppendDeployRecord:
         content = (tmp_repo / ".env").read_text()
         assert "APP_VERSION=1.2.3" in content
 
-    def test_swap_success_logs_app_version_without_incrementing(self, tmp_repo: Path) -> None:
+    def test_swap_success_for_new_git_ref_increments_version(self, tmp_repo: Path) -> None:
+        csv_path = tmp_repo / "out" / "deploy" / "deploy_log.csv"
+        csv_path.parent.mkdir(parents=True)
+        with csv_path.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(CSV_COLUMNS)
+            writer.writerow(["2026-05-18T00:00:00Z", "0" * 40, "1.2.3", "swap", "prod-stack", "prod.example.com", "img", "success"])
+
         csv_path = append_deploy_record(
             repo_root=tmp_repo,
             target="swap",
@@ -172,10 +179,35 @@ class TestAppendDeployRecord:
         )
 
         rows = list(csv.reader(csv_path.open()))
-        assert rows[1][2] == "1.2.3"
+        assert rows[1][2] == "1.2.4"
         assert rows[1][3] == "swap"
         content = (tmp_repo / ".env").read_text()
-        assert "APP_VERSION=1.2.3" in content
+        assert "APP_VERSION=1.2.4" in content
+
+    def test_swap_success_for_same_git_ref_does_not_increment_again(self, tmp_repo: Path) -> None:
+        _write_app_version(tmp_repo, "1.2.4")
+        csv_path = tmp_repo / "out" / "deploy" / "deploy_log.csv"
+        csv_path.parent.mkdir(parents=True)
+        with csv_path.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(CSV_COLUMNS)
+            writer.writerow(["2026-05-18T00:00:00Z", "1" * 40, "1.2.4", "swap", "prod-stack", "prod.example.com", "img", "success"])
+
+        csv_path = append_deploy_record(
+            repo_root=tmp_repo,
+            target="swap",
+            stack_name="prod-stack",
+            domain="prod.example.com",
+            image="img",
+            status="success",
+            git_ref="1" * 40,
+        )
+
+        rows = list(csv.reader(csv_path.open()))
+        assert rows[1][2] == "1.2.4"
+        assert rows[1][3] == "swap"
+        content = (tmp_repo / ".env").read_text()
+        assert "APP_VERSION=1.2.4" in content
 
     def test_production_failure_does_not_increment(self, tmp_repo: Path) -> None:
         append_deploy_record(

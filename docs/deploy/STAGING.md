@@ -84,7 +84,7 @@ This:
 3. Updates/starts the production Portainer stack
 4. Stops staging containers via Portainer API
 5. Keeps Caddy routing on `PUBLIC_DOMAIN` → production stack
-6. Logs a `swap` event to the deploy CSV without incrementing `APP_VERSION`
+6. Logs a `swap` event to the deploy CSV and increments `APP_VERSION` when the promoted git ref differs from the latest successful production/swap record
 
 Rollback uses a normal production deploy from the desired `git_ref` recorded in the deploy log.
 
@@ -103,7 +103,7 @@ Every deploy writes a row to `out/deploy/deploy_log.csv`. The latest record appe
 | `image` | Container image deployed |
 | `status` | `success` / `failed` |
 
-`APP_VERSION` is recorded in the `version` column for every deploy. Successful production deploys increment `APP_VERSION` after the row is written. `swap` records do not increment `APP_VERSION`; they record the version associated with the staged promotion.
+`APP_VERSION` is recorded in the `version` column for every deploy. Successful production deploys increment `APP_VERSION` after the row is written. `swap` records increment the patch version when they promote a different git ref than the latest successful `production` or `swap` row; repeated swaps of the same git ref do not increment again. Staging records never increment `APP_VERSION`.
 
 **Rollback from CSV**: Find the latest `production` or `swap` + `success` row, use `git_ref` to checkout that commit, redeploy with `--prod`.
 

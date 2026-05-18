@@ -5,7 +5,9 @@ the git ref, version, target environment, stack name, domain, image, and status.
 Newest records are stored directly under the CSV header.
 
 After a successful **production** deploy, auto-increments the patch component
-of APP_VERSION in `.env`.
+of APP_VERSION in `.env`. A successful **swap** promotion records and writes
+the next patch version when it promotes a different git ref than the latest
+successful production/swap record.
 """
 
 from __future__ import annotations
@@ -91,6 +93,27 @@ def get_csv_path(repo_root: Path) -> Path:
     return repo_root / "out" / "deploy" / "deploy_log.csv"
 
 
+def _latest_successful_release_git_ref(existing_rows: list[list[str]]) -> str:
+    """Return the newest successful production/swap git ref from existing CSV rows."""
+    for row in existing_rows:
+        if len(row) < len(CSV_COLUMNS):
+            continue
+        git_ref = str(row[1] or "").strip()
+        target = str(row[3] or "").strip()
+        status = str(row[7] or "").strip()
+        if target in {"production", "swap"} and status == "success" and git_ref:
+            return git_ref
+    return ""
+
+
+def _should_increment_swap_version(*, target: str, status: str, git_ref: str, existing_rows: list[list[str]]) -> bool:
+    """True when a swap promotion represents a new release git ref."""
+    if target != "swap" or status != "success":
+        return False
+    latest_release_git_ref = _latest_successful_release_git_ref(existing_rows)
+    return not latest_release_git_ref or latest_release_git_ref != git_ref
+
+
 def append_deploy_record(
     *,
     repo_root: Path,
@@ -113,6 +136,25 @@ def append_deploy_record(
     resolved_version = version if version is not None else _read_app_version(repo_root)
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    existing_rows: list[list[str]] = []
+    if csv_path.exists() and csv_path.stat().st_size > 0:
+        with csv_path.open(newline="") as f:
+            rows = list(csv.reader(f))
+        if rows:
+            existing_rows = rows[1:] if rows[0] == CSV_COLUMNS else rows
+
+    swap_incremented = False
+    if version is None and _should_increment_swap_version(
+        target=target,
+        status=status,
+        git_ref=resolved_git_ref,
+        existing_rows=existing_rows,
+    ):
+        new_version = _increment_patch(resolved_version)
+        if new_version != resolved_version:
+            resolved_version = new_version
+            swap_incremented = True
+
     new_row = [
         timestamp,
         resolved_git_ref,
@@ -123,13 +165,6 @@ def append_deploy_record(
         image,
         status,
     ]
-
-    existing_rows: list[list[str]] = []
-    if csv_path.exists() and csv_path.stat().st_size > 0:
-        with csv_path.open(newline="") as f:
-            rows = list(csv.reader(f))
-        if rows:
-            existing_rows = rows[1:] if rows[0] == CSV_COLUMNS else rows
 
     with csv_path.open("w", newline="") as f:
         writer = csv.writer(f)
@@ -142,5 +177,7 @@ def append_deploy_record(
         new_version = _increment_patch(resolved_version)
         if new_version != resolved_version:
             _write_app_version(repo_root, new_version)
+    elif swap_incremented:
+        _write_app_version(repo_root, resolved_version)
 
     return csv_path
