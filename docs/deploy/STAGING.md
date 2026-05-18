@@ -37,7 +37,7 @@ Add these keys to `.env.deploy`:
 PUBLIC_DOMAIN=your-app.example.com
 
 # Staging environment
-STAGING_PUBLIC_DOMAIN=staging_your-app.example.com
+STAGING_PUBLIC_DOMAIN=staging-your-app.example.com
 STAGING_REMOTE_DIR=/home/your-user/containers/protected-container-staging
 STAGING_PORTAINER_STACK_NAME=protected-container-staging
 ```
@@ -106,6 +106,31 @@ Every deploy appends a row to `out/deploy/deploy_log.csv`:
 python scripts/deploy/ubuntu_deploy.py --swap --prod
 # error: --prod and --swap are mutually exclusive
 ```
+
+## Adopting Staging in a Downstream Project
+
+Projects that use this toolkit as their deployment base inherit staging support with minimal effort:
+
+1. **Add DNS record** for your staging domain (e.g. `staging-myapp.example.com`) pointing to the same server as production.
+
+2. **Add staging keys to `.env.deploy`**:
+   ```bash
+   STAGING_PUBLIC_DOMAIN=staging-myapp.example.com
+   STAGING_REMOTE_DIR=/home/deploy/containers/myapp-staging
+   STAGING_PORTAINER_STACK_NAME=myapp-staging
+   ```
+
+3. **Deploy to staging** (default — no extra flags):
+   ```bash
+   source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py
+   ```
+
+4. **Verify staging works**, then swap traffic:
+   ```bash
+   source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py --swap
+   ```
+
+That's it. No code changes, hook modifications, or Compose file edits are needed. The same `ubuntu_deploy.py`, hooks, and Compose contract are reused — only the env parameters differ.
 
 ## Related Docs
 
