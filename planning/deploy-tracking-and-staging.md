@@ -51,15 +51,15 @@
 ## Checkable Task Overview
 
 ### Phase 0 — Cleanup
-- [ ] Audit `scripts/deploy/ubuntu_deploy.py` for dead code, unused imports, or stale references relevant to the touched surface
-- [ ] Audit `scripts/deploy/env_schema.py` for commented-out keys or stale patterns
-- [ ] Remove any dead code found
-- [ ] Verify existing tests pass after cleanup (`pytest -q`)
+- [x] Audit `scripts/deploy/ubuntu_deploy.py` for dead code, unused imports, or stale references relevant to the touched surface
+- [x] Audit `scripts/deploy/env_schema.py` for commented-out keys or stale patterns
+- [x] Remove any dead code found
+- [x] Verify existing tests pass after cleanup (`pytest -q`)
 
 ### Phase 1 — Deploy Tracking CSV (`out/deploy/deploy_log.csv`)
-- [ ] Add `APP_VERSION=0.1.0` to `.env` (runtime config, read at deploy time)
-- [ ] Add `APP_VERSION` to `env_schema.py` RUNTIME_SCHEMA (optional, default `0.0.0`)
-- [ ] Create `scripts/deploy/deploy_log.py` with:
+- [x] Add `APP_VERSION=0.1.0` to `.env` (runtime config, read at deploy time)
+- [x] Add `APP_VERSION` to `env_schema.py` RUNTIME_SCHEMA (optional, default `0.0.0`)
+- [x] Create `scripts/deploy/deploy_log.py` with:
   - `append_deploy_record(repo_root, git_ref, version, target, stack_name, domain, image, status)` → appends a row
   - CSV columns: `timestamp,git_ref,version,target,stack_name,domain,image,status`
   - Auto-creates `out/deploy/` directory if missing
@@ -67,50 +67,50 @@
   - `version` = read from `.env` key `APP_VERSION`
   - After successful **production** deploy: auto-increment patch in `.env` (`1.2.3` → `1.2.4`) so next deploy gets a new version
   - Staging deploys: log current version but do NOT increment
-- [ ] Integrate `append_deploy_record` call at end of `ubuntu_deploy.py` main() after `"✅ Done"` message
-- [ ] Add `out/deploy/` to `.gitignore` (tracking CSV is local state, not committed)
-- [ ] Write unit tests for `deploy_log.py` (CSV creation, append, column integrity, version increment)
+- [x] Integrate `append_deploy_record` call at end of `ubuntu_deploy.py` main() after `"✅ Done"` message
+- [x] Add `out/deploy/` to `.gitignore` (tracking CSV is local state, not committed)
+- [x] Write unit tests for `deploy_log.py` (CSV creation, append, column integrity, version increment)
 
 ### Phase 2 — Staging Environment Support
-- [ ] Add optional env keys to `env_schema.py`:
+- [x] Add optional env keys to `env_schema.py`:
   - `STAGING_PUBLIC_DOMAIN` — staging domain
   - `STAGING_REMOTE_DIR` — staging remote directory
   - `STAGING_PORTAINER_STACK_NAME` — staging stack name
-- [ ] Change `ubuntu_deploy.py` default behavior:
+- [x] Change `ubuntu_deploy.py` default behavior:
   - **Default (no flag)**: deploy to staging (uses `STAGING_*` env keys)
   - **`--prod` flag**: deploy to production (uses existing `PUBLIC_DOMAIN`, `UBUNTU_REMOTE_DIR`, `PORTAINER_STACK_NAME`)
   - **`--swap` flag**: swap Caddy routing between staging and production (no deploy, just traffic switch)
   - Mutually exclusive: `--prod` and `--swap` cannot be combined
-- [ ] Update `env.deploy.example` with commented staging examples
-- [ ] Include target (`staging` / `production`) in the CSV log `target` column
+- [x] Update `env.deploy.example` with commented staging examples
+- [x] Include target (`staging` / `production`) in the CSV log `target` column
 
 ### Phase 3 — Swap via `--swap` Flag
-- [ ] Implement `--swap` handler in `ubuntu_deploy.py`:
+- [x] Implement `--swap` handler in `ubuntu_deploy.py`:
   - SSHs into host, checks both prod and staging containers are healthy (`docker ps`)
   - Reads current Caddy upstream mappings for both domains
   - Rewrites Caddyfile: production domain → staging container, staging domain → production container
   - Reloads Caddy (`docker exec central-proxy caddy reload`)
   - Appends a `swap` event to the deploy CSV
   - Fails clearly if either stack is unhealthy
-- [ ] Extract swap logic into a helper function (testable without CLI)
-- [ ] Write integration tests for swap logic (mock SSH + Caddy register calls)
+- [x] Extract swap logic into a helper function (testable without CLI)
+- [x] Write integration tests for swap logic (mock SSH + Caddy register calls)
 
 ### Phase 4 — Documentation
-- [ ] Create `docs/deploy/STAGING.md`:
+- [x] Create `docs/deploy/STAGING.md`:
   - Architecture overview (same host, two stacks, shared Caddy)
   - Environment setup (which env keys to set)
   - Deploy to staging workflow
   - Swap production ↔ staging workflow
   - Rollback (swap back)
-- [ ] Update `docs/deploy/UBUNTU_SERVER.md` with a cross-reference to staging docs
-- [ ] Update `env.deploy.example` header comment to mention staging keys
+- [x] Update `docs/deploy/UBUNTU_SERVER.md` with a cross-reference to staging docs
+- [x] Update `env.deploy.example` header comment to mention staging keys
 
 ### Phase 5 — Validation
-- [ ] All new and existing tests pass (`pytest`)
-- [ ] `ubuntu_deploy.py --help` shows `--prod` and `--swap` flags
-- [ ] `ubuntu_deploy.py --swap --prod` errors with mutual exclusion message
-- [ ] `validate_env.py` passes with and without staging keys set
-- [ ] CSV file is created correctly after a dry-run or mocked deploy
+- [x] All new and existing tests pass (`pytest`)
+- [x] `ubuntu_deploy.py --help` shows `--prod` and `--swap` flags
+- [x] `ubuntu_deploy.py --swap --prod` errors with mutual exclusion message
+- [x] `validate_env.py` passes with and without staging keys set
+- [x] CSV file is created correctly after a dry-run or mocked deploy
 
 ---
 
