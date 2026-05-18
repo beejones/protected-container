@@ -101,7 +101,7 @@ class TestAppendDeployRecord:
         assert rows[1][6] == "ghcr.io/user/app:latest"
         assert rows[1][7] == "success"
 
-    def test_appends_multiple_rows(self, tmp_repo: Path) -> None:
+    def test_writes_newest_record_below_header(self, tmp_repo: Path) -> None:
         append_deploy_record(
             repo_root=tmp_repo,
             target="staging",
@@ -126,6 +126,12 @@ class TestAppendDeployRecord:
         rows = list(csv.reader(csv_path.open()))
         # Header + 2 data rows
         assert len(rows) == 3
+        assert rows[1][1] == "c" * 40
+        assert rows[1][2] == "1.0.1"
+        assert rows[1][3] == "production"
+        assert rows[2][1] == "b" * 40
+        assert rows[2][2] == "1.0.0"
+        assert rows[2][3] == "staging"
 
     def test_production_success_increments_version(self, tmp_repo: Path) -> None:
         append_deploy_record(
@@ -151,6 +157,23 @@ class TestAppendDeployRecord:
             status="success",
             git_ref="e" * 40,
         )
+        content = (tmp_repo / ".env").read_text()
+        assert "APP_VERSION=1.2.3" in content
+
+    def test_swap_success_logs_app_version_without_incrementing(self, tmp_repo: Path) -> None:
+        csv_path = append_deploy_record(
+            repo_root=tmp_repo,
+            target="swap",
+            stack_name="prod-stack",
+            domain="prod.example.com",
+            image="img",
+            status="success",
+            git_ref="1" * 40,
+        )
+
+        rows = list(csv.reader(csv_path.open()))
+        assert rows[1][2] == "1.2.3"
+        assert rows[1][3] == "swap"
         content = (tmp_repo / ".env").read_text()
         assert "APP_VERSION=1.2.3" in content
 

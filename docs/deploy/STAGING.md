@@ -6,8 +6,8 @@
 - Only the target parameters differ: domain, remote dir, stack name.
 - Default deploy target is **staging** to prevent accidental production deploys.
 - Staging containers share production volumes but are **not started** on deploy.
-- Only one stack (production or staging) runs at a time to avoid volume conflicts.
-- Swap = stop active stack + start inactive stack + swap Caddy routing.
+- Public traffic always routes to the production stack via `PUBLIC_DOMAIN`.
+- Swap = promote the staged Compose/image configuration into the production stack, start production, then stop staging.
 
 ## Architecture
 
@@ -16,21 +16,21 @@
 │  Ubuntu Host                                                 │
 │                                                              │
 │  ┌──────────────┐                                            │
-│  │ Central Caddy │──► production.domain → active containers  │
-│  │  (ports 80,  │──► staging.domain    → active containers  │
+│  │ Central Caddy │──► production.domain → production stack   │
+│  │  (ports 80,  │──► staging.domain    → staging stack       │
 │  │   443)       │                                            │
 │  └──────────────┘                                            │
 │                                                              │
 │  ┌─────────────────────────┐  ┌────────────────────────────┐ │
 │  │ production stack        │  │ staging stack              │ │
-│  │ (running OR stopped)    │  │ (stopped OR running)       │ │
+│  │ (running)               │  │ (stopped after deploy/swap)│ │
 │  │ Shared production       │  │ Shared production          │ │
 │  │ volumes                 │  │ volumes                    │ │
 │  └─────────────────────────┘  └────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Both stacks are managed by Portainer on the same host. Only one runs at a time. The centralized Caddy proxy routes traffic to whichever stack is active. When a staging stack is rendered for Portainer, explicit `container_name` values are rewritten to avoid collisions with production (for example, `protected-container` becomes the staging stack name).
+Both stacks are managed by Portainer on the same host. The centralized Caddy proxy keeps `PUBLIC_DOMAIN` pointed at the production stack. When a staging stack is rendered for Portainer, explicit `container_name` values are rewritten to avoid collisions with production (for example, `protected-container` becomes the staging stack name). Staging is stopped after staging deploys and after swaps so it never remains the active runtime.
 
 ## Environment Setup
 
@@ -48,6 +48,8 @@ STAGING_PORTAINER_STACK_NAME=protected-container-staging
 
 Ensure DNS records exist for both `PUBLIC_DOMAIN` and `STAGING_PUBLIC_DOMAIN` pointing to the same server.
 
+Portainer API calls use the SSL-enabled Portainer host derived from `PUBLIC_DOMAIN`. For example, `PUBLIC_DOMAIN=protected-container.zenia.eu` resolves Portainer API calls to `portainer.zenia.eu` on HTTPS port `443` unless `PORTAINER_HTTPS_PORT` is set.
+
 ## Deploy to Staging
 
 Staging is the default target:
@@ -56,7 +58,7 @@ Staging is the default target:
 source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py
 ```
 
-This deploys using `STAGING_*` overrides for domain, remote dir, and stack name. Containers are **created and then stopped via Portainer API** — they're ready to be activated via `--swap`. All other settings (SSH host, compose files, hooks) are shared.
+This deploys using `STAGING_*` overrides for domain, remote dir, and stack name. Containers are **created and then stopped via Portainer API**. All other settings (SSH host, compose files, hooks) are shared.
 
 ## Deploy to Production
 
@@ -66,11 +68,11 @@ Pass `--prod` to target production:
 source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py --prod
 ```
 
-This starts production containers and stops any running staging containers. A successful production deploy auto-increments `APP_VERSION` patch in `.env`.
+This updates and starts production containers, then stops any staging containers. A successful production deploy auto-increments `APP_VERSION` patch in `.env`.
 
-## Swap Production ↔ Staging
+## Promote Staging to Production
 
-Swap the active stack — stops the currently running containers and starts the other set:
+Promote the staged build into the production stack while keeping public routing on `PUBLIC_DOMAIN`:
 
 ```bash
 source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py --swap
@@ -78,19 +80,17 @@ source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py --swap
 
 This:
 1. Verifies the staging Portainer stack has containers
-2. Stops the production stack containers via Portainer API
-3. Starts the staging stack containers via Portainer API
-4. Swaps Caddy `reverse_proxy` upstreams so the production domain serves staging containers
-5. Reloads Caddy
-6. Logs a `swap` event to the deploy CSV
+2. Renders the production stack from the same Compose contract and configured images
+3. Updates/starts the production Portainer stack
+4. Stops staging containers via Portainer API
+5. Keeps Caddy routing on `PUBLIC_DOMAIN` → production stack
+6. Logs a `swap` event to the deploy CSV without incrementing `APP_VERSION`
 
-If the Caddy swap fails, the script automatically rolls back: stops staging, restarts production.
-
-**Rollback**: Run `--swap` again — it's symmetric (stops staging, starts production, swaps Caddy back).
+Rollback uses a normal production deploy from the desired `git_ref` recorded in the deploy log.
 
 ## Deploy Tracking CSV
 
-Every deploy appends a row to `out/deploy/deploy_log.csv`:
+Every deploy writes a row to `out/deploy/deploy_log.csv`. The latest record appears directly under the header:
 
 | Column | Example |
 |--------|---------|
@@ -103,7 +103,9 @@ Every deploy appends a row to `out/deploy/deploy_log.csv`:
 | `image` | Container image deployed |
 | `status` | `success` / `failed` |
 
-**Rollback from CSV**: Find the last `production` + `success` row, use `git_ref` to checkout that commit, redeploy with `--prod`.
+`APP_VERSION` is recorded in the `version` column for every deploy. Successful production deploys increment `APP_VERSION` after the row is written. `swap` records do not increment `APP_VERSION`; they record the version associated with the staged promotion.
+
+**Rollback from CSV**: Find the latest `production` or `swap` + `success` row, use `git_ref` to checkout that commit, redeploy with `--prod`.
 
 ## Mutual Exclusion
 
@@ -138,7 +140,7 @@ Projects that use this toolkit as their deployment base inherit staging support 
    source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py
    ```
 
-5. **Verify staging works**, then swap traffic:
+5. **Verify staging works**, then promote it to production:
    ```bash
    source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py --swap
    ```

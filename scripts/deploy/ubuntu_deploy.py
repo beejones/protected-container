@@ -19,6 +19,7 @@ import shlex
 import subprocess
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 from dotenv import dotenv_values
@@ -141,6 +142,69 @@ def resolve_network_host_from_ssh_target(host: str) -> str:
             return resolved_host
 
     return fallback_host
+
+
+def _hostname_from_urlish(value: str) -> str:
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return ""
+
+    if "://" in raw_value:
+        parsed = urlparse(raw_value)
+        raw_value = parsed.hostname or raw_value
+
+    raw_value = raw_value.split("/", 1)[0]
+    if "@" in raw_value:
+        raw_value = raw_value.rsplit("@", 1)[1]
+    if raw_value.count(":") == 1:
+        raw_value = raw_value.split(":", 1)[0]
+    return raw_value.strip().strip("[]")
+
+
+def _is_ipv4_host(host: str) -> bool:
+    parts = host.split(".")
+    return len(parts) == 4 and all(part.isdigit() and 0 <= int(part) <= 255 for part in parts)
+
+
+def derive_portainer_host_from_public_domain(public_domain: str) -> str:
+    hostname = _hostname_from_urlish(public_domain).lower()
+    if not hostname or hostname == "localhost" or _is_ipv4_host(hostname):
+        return ""
+
+    labels = [label for label in hostname.split(".") if label]
+    if len(labels) < 2:
+        return ""
+    if labels[0] == "portainer":
+        return hostname
+    if len(labels) == 2:
+        return f"portainer.{hostname}"
+    return "portainer." + ".".join(labels[1:])
+
+
+def resolve_portainer_api_host(*, repo_root: Path, ssh_host: str) -> str:
+    public_domain = str(os.getenv(ENV_PUBLIC_DOMAIN) or "").strip()
+    if not public_domain:
+        public_domain = read_deploy_key(repo_root=repo_root, key=ENV_PUBLIC_DOMAIN)
+
+    derived_portainer_host = derive_portainer_host_from_public_domain(public_domain)
+    if derived_portainer_host:
+        return derived_portainer_host
+
+    return resolve_network_host_from_ssh_target(ssh_host)
+
+
+def default_portainer_https_port(*, portainer_host: str, ssh_host: str) -> int:
+    portainer_hostname = _hostname_from_urlish(portainer_host)
+    ssh_hostname = _hostname_from_urlish(portainer_helpers.extract_ssh_hostname(ssh_host))
+    if portainer_hostname and ssh_hostname and portainer_hostname != ssh_hostname:
+        return 443
+    return 9943
+
+
+def resolve_deploy_target(*, prod: bool, swap: bool) -> str:
+    if prod or swap:
+        return "production"
+    return "staging"
 
 
 def build_docker_build_cmd(*, app_image: str, dockerfile: str, context_dir: str) -> list[str]:
@@ -609,7 +673,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         "--portainer-https-port",
         type=int,
         default=None,
-        help="Host HTTPS port for Portainer when auto-creating container (resolution: CLI/env/.env.deploy -> 9943)",
+        help="Portainer HTTPS port (resolution: CLI/env/.env.deploy -> 443 for portainer.<PUBLIC_DOMAIN base>, else 9943)",
     )
     parser.add_argument(
         "--portainer-webhook-insecure",
@@ -653,7 +717,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     parser.add_argument(
         "--swap",
         action="store_true",
-        help="Swap Caddy routing between staging and production (no deploy, just traffic switch).",
+        help="Promote the staged stack to production, keep PUBLIC_DOMAIN routed to production, then stop staging.",
     )
 
     args = parser.parse_args(argv)
@@ -661,7 +725,8 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     if args.prod and args.swap:
         parser.error("--prod and --swap are mutually exclusive")
 
-    deploy_target = "swap" if args.swap else ("production" if args.prod else "staging")
+    swap_requested = bool(args.swap)
+    deploy_target = resolve_deploy_target(prod=bool(args.prod), swap=swap_requested)
 
     step_number = 0
     step_color = "\033[95m"
@@ -696,186 +761,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         resolved_host = read_deploy_key(repo_root=repo_root, key=ENV_UBUNTU_SSH_HOST)
     if not resolved_host:
         raise SystemExit("Missing SSH host: provide --host, set UBUNTU_SSH_HOST, or add UBUNTU_SSH_HOST to .env.deploy")
-    resolved_portainer_host = resolve_network_host_from_ssh_target(resolved_host)
-
-    # --- Handle --swap: short-circuit before normal deploy ------------------
-    if deploy_target == "swap":
-        import swap_environment
-
-        prod_domain = str(os.getenv(ENV_PUBLIC_DOMAIN) or "").strip()
-        if not prod_domain:
-            prod_domain = read_deploy_key(repo_root=repo_root, key=ENV_PUBLIC_DOMAIN)
-        staging_domain = str(os.getenv(ENV_STAGING_PUBLIC_DOMAIN) or "").strip()
-        if not staging_domain:
-            staging_domain = read_deploy_key(repo_root=repo_root, key=ENV_STAGING_PUBLIC_DOMAIN)
-
-        if not prod_domain or not staging_domain:
-            raise SystemExit(
-                "Both PUBLIC_DOMAIN and STAGING_PUBLIC_DOMAIN must be set for --swap. "
-                "Set them in .env.deploy."
-            )
-
-        resolved_caddy_proxy_dir = str(os.getenv(ENV_CADDY_PROXY_DIR) or "").strip()
-        if not resolved_caddy_proxy_dir:
-            resolved_caddy_proxy_dir = read_deploy_key(repo_root=repo_root, key=ENV_CADDY_PROXY_DIR)
-
-        # Resolve production remote dir
-        prod_remote_dir_raw = str(os.getenv(ENV_UBUNTU_REMOTE_DIR) or "").strip()
-        if not prod_remote_dir_raw:
-            prod_remote_dir_raw = read_deploy_key(repo_root=repo_root, key=ENV_UBUNTU_REMOTE_DIR)
-        if not prod_remote_dir_raw:
-            prod_remote_dir_raw = "/opt/protected-container"
-        prod_remote_dir = Path(prod_remote_dir_raw)
-
-        prod_stack_name = str(os.getenv(ENV_PORTAINER_STACK_NAME) or "").strip()
-        if not prod_stack_name:
-            prod_stack_name = read_deploy_key(repo_root=repo_root, key=ENV_PORTAINER_STACK_NAME)
-        if not prod_stack_name:
-            prod_stack_name = prod_remote_dir.name
-
-        staging_stack_name = str(os.getenv(ENV_STAGING_PORTAINER_STACK_NAME) or "").strip()
-        if not staging_stack_name:
-            staging_stack_name = read_deploy_key(repo_root=repo_root, key=ENV_STAGING_PORTAINER_STACK_NAME)
-        if not staging_stack_name:
-            raise SystemExit(
-                "[ubuntu-deploy] ❌ STAGING_PORTAINER_STACK_NAME is not set. "
-                "Swap requires the staging Portainer stack name."
-            )
-
-        swap_portainer_https_port_raw = str(os.getenv(ENV_PORTAINER_HTTPS_PORT) or "").strip()
-        if not swap_portainer_https_port_raw:
-            swap_portainer_https_port_raw = read_deploy_key(repo_root=repo_root, key=ENV_PORTAINER_HTTPS_PORT)
-        try:
-            swap_portainer_https_port = int(swap_portainer_https_port_raw or "9943")
-        except ValueError:
-            raise SystemExit("PORTAINER_HTTPS_PORT must be an integer")
-
-        swap_webhook_insecure_raw = str(os.getenv(ENV_PORTAINER_WEBHOOK_INSECURE) or "").strip()
-        if not swap_webhook_insecure_raw:
-            swap_webhook_insecure_raw = read_deploy_key(repo_root=repo_root, key=ENV_PORTAINER_WEBHOOK_INSECURE)
-        swap_portainer_insecure = parse_boolish(swap_webhook_insecure_raw, default=False)
-
-        swap_portainer_endpoint_id = str(os.getenv(ENV_PORTAINER_ENDPOINT_ID) or "").strip()
-        if not swap_portainer_endpoint_id:
-            swap_portainer_endpoint_id = read_deploy_key(repo_root=repo_root, key=ENV_PORTAINER_ENDPOINT_ID)
-
-        swap_portainer_access_token = str(os.getenv(ENV_PORTAINER_ACCESS_TOKEN) or "").strip()
-        if not swap_portainer_access_token:
-            swap_portainer_access_token = read_deploy_secret_key(repo_root=repo_root, key=ENV_PORTAINER_ACCESS_TOKEN)
-        if not swap_portainer_access_token:
-            raise SystemExit(
-                "PORTAINER_ACCESS_TOKEN is required for --swap because container lifecycle is managed through the Portainer API."
-            )
-
-        proxy_repo_dir = Path(resolved_caddy_proxy_dir) if resolved_caddy_proxy_dir else (prod_remote_dir.parent / "protected-container")
-        caddyfile_path = str(proxy_repo_dir / "docker" / "proxy" / "Caddyfile")
-
-        log_step("Swapping staging ↔ production", icon="🔄")
-        log_info(f"Production domain: {prod_domain}")
-        log_info(f"Staging domain: {staging_domain}")
-
-        log_step("Verifying staging containers exist", icon="🔎")
-        staging_containers = portainer_helpers.list_portainer_stack_containers(
-            host=resolved_portainer_host,
-            https_port=swap_portainer_https_port,
-            insecure=swap_portainer_insecure,
-            endpoint_id=swap_portainer_endpoint_id,
-            access_token=swap_portainer_access_token,
-            stack_name=staging_stack_name,
-        )
-        if not staging_containers:
-            raise SystemExit(
-                "Staging containers are not ready for swap. "
-                "Run `source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py` first."
-            )
-        log_info(f"Portainer stack: {staging_stack_name} ({len(staging_containers)} containers)")
-
-        # Step: Stop production containers
-        log_step("Stopping production containers", icon="⏹️")
-        stopped = portainer_helpers.set_portainer_stack_containers_state(
-            host=resolved_portainer_host,
-            https_port=swap_portainer_https_port,
-            insecure=swap_portainer_insecure,
-            endpoint_id=swap_portainer_endpoint_id,
-            access_token=swap_portainer_access_token,
-            stack_name=prod_stack_name,
-            action="stop",
-        )
-        log_info(f"Stopped via Portainer stack {prod_stack_name}: {', '.join(stopped)}")
-
-        # Step: Start staging containers
-        log_step("Starting staging containers", icon="▶️")
-        try:
-            started = portainer_helpers.set_portainer_stack_containers_state(
-                host=resolved_portainer_host,
-                https_port=swap_portainer_https_port,
-                insecure=swap_portainer_insecure,
-                endpoint_id=swap_portainer_endpoint_id,
-                access_token=swap_portainer_access_token,
-                stack_name=staging_stack_name,
-                action="start",
-            )
-            log_info(f"Started via Portainer stack {staging_stack_name}: {', '.join(started)}")
-        except SystemExit:
-            log_info("Starting staging failed — restarting production containers", icon="⚠️")
-            portainer_helpers.set_portainer_stack_containers_state(
-                host=resolved_portainer_host,
-                https_port=swap_portainer_https_port,
-                insecure=swap_portainer_insecure,
-                endpoint_id=swap_portainer_endpoint_id,
-                access_token=swap_portainer_access_token,
-                stack_name=prod_stack_name,
-                action="start",
-            )
-            raise
-
-        # Step: Swap Caddy routing
-        log_step("Swapping Caddy routing", icon="🔀")
-        swap_config = swap_environment.SwapConfig(
-            ssh_host=resolved_host,
-            caddyfile_path=caddyfile_path,
-            production_domain=prod_domain,
-            staging_domain=staging_domain,
-        )
-        swap_result = swap_environment.perform_swap(swap_config)
-
-        if not swap_result.success:
-            # Attempt rollback: stop staging, restart production
-            log_info("Caddy swap failed — rolling back container state", icon="⚠️")
-            portainer_helpers.set_portainer_stack_containers_state(
-                host=resolved_portainer_host,
-                https_port=swap_portainer_https_port,
-                insecure=swap_portainer_insecure,
-                endpoint_id=swap_portainer_endpoint_id,
-                access_token=swap_portainer_access_token,
-                stack_name=staging_stack_name,
-                action="stop",
-            )
-            portainer_helpers.set_portainer_stack_containers_state(
-                host=resolved_portainer_host,
-                https_port=swap_portainer_https_port,
-                insecure=swap_portainer_insecure,
-                endpoint_id=swap_portainer_endpoint_id,
-                access_token=swap_portainer_access_token,
-                stack_name=prod_stack_name,
-                action="start",
-            )
-            raise SystemExit(f"Swap failed: {swap_result.message}")
-
-        log_info(f"Production upstream: {swap_result.prod_upstream_before} → {swap_result.prod_upstream_after}")
-        log_info(f"Staging upstream: {swap_result.staging_upstream_before} → {swap_result.staging_upstream_after}")
-
-        deploy_log.append_deploy_record(
-            repo_root=repo_root,
-            target="swap",
-            stack_name="",
-            domain=prod_domain,
-            image="",
-            status="success",
-        )
-
-        print("[ubuntu-deploy] ✅ Swap complete. Production domain now serves staging containers.")
-        return
+    resolved_portainer_host = resolve_portainer_api_host(repo_root=repo_root, ssh_host=resolved_host)
 
     resolved_remote_dir = str(args.remote_dir or "").strip()
     if not resolved_remote_dir:
@@ -926,7 +812,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     if not resolved_storage_manager_dockerfile:
         resolved_storage_manager_dockerfile = "docker/storage-manager/Dockerfile"
 
-    resolved_build_push_enabled = not bool(args.skip_build_push)
+    resolved_build_push_enabled = not bool(args.skip_build_push) and not swap_requested
     if resolved_build_push_enabled:
         build_push_raw = str(os.getenv(ENV_UBUNTU_BUILD_PUSH) or "").strip()
         if not build_push_raw:
@@ -938,7 +824,10 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         resolved_portainer_https_port_raw = str(os.getenv(ENV_PORTAINER_HTTPS_PORT) or "").strip()
     if not resolved_portainer_https_port_raw:
         resolved_portainer_https_port_raw = read_deploy_key(repo_root=repo_root, key=ENV_PORTAINER_HTTPS_PORT)
-    resolved_portainer_https_port = int(resolved_portainer_https_port_raw or "9943")
+    resolved_portainer_https_port = int(
+        resolved_portainer_https_port_raw
+        or str(default_portainer_https_port(portainer_host=resolved_portainer_host, ssh_host=resolved_host))
+    )
 
     resolved_sync_secrets = bool(args.sync_secrets)
     if not resolved_sync_secrets:
@@ -1270,6 +1159,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                 "If you intentionally want webhook-only deploys, remove PORTAINER_ACCESS_TOKEN."
             )
 
+    staging_stack_name_for_stop = ""
     if deploy_target == "production":
         staging_stack_name_for_stop = str(os.getenv(ENV_STAGING_PORTAINER_STACK_NAME) or "").strip()
         if not staging_stack_name_for_stop:
@@ -1280,8 +1170,8 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                     "PORTAINER_ACCESS_TOKEN is required for --prod when STAGING_PORTAINER_STACK_NAME is set "
                     "because staging lifecycle is managed through the Portainer API."
                 )
-            if not used_remote_compose_fallback:
-                log_step("Stopping staging containers (production takes over)", icon="⏹️")
+            if swap_requested and not used_remote_compose_fallback:
+                log_step("Verifying staged containers exist", icon="🔎")
                 staging_containers = portainer_helpers.list_portainer_stack_containers(
                     host=resolved_portainer_host,
                     https_port=resolved_portainer_https_port,
@@ -1290,19 +1180,17 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                     access_token=resolved_portainer_access_token,
                     stack_name=staging_stack_name_for_stop,
                 )
-                if staging_containers:
-                    stopped = portainer_helpers.set_portainer_stack_containers_state(
-                        host=resolved_portainer_host,
-                        https_port=resolved_portainer_https_port,
-                        insecure=resolved_portainer_webhook_insecure,
-                        endpoint_id=resolved_portainer_endpoint_id,
-                        access_token=resolved_portainer_access_token,
-                        stack_name=staging_stack_name_for_stop,
-                        action="stop",
+                if not staging_containers:
+                    raise SystemExit(
+                        "Staging containers are not ready for swap. "
+                        "Run `source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py` first."
                     )
-                    log_info(f"Stopped via Portainer stack {staging_stack_name_for_stop}: {', '.join(stopped)}")
-                else:
-                    log_info("No staging containers to stop (not deployed yet).")
+                log_info(f"Staged Portainer stack: {staging_stack_name_for_stop} ({len(staging_containers)} containers)")
+        elif swap_requested:
+            raise SystemExit(
+                "[ubuntu-deploy] ❌ STAGING_PORTAINER_STACK_NAME is not set. "
+                "Swap requires the staging Portainer stack name."
+            )
 
     if used_remote_compose_fallback:
         if deploy_target == "staging":
@@ -1363,6 +1251,30 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             insecure=resolved_portainer_webhook_insecure,
             has_api_auth=has_portainer_api_auth,
         )
+
+    if deploy_target == "production" and staging_stack_name_for_stop and not used_remote_compose_fallback:
+        log_step("Stopping staging containers (production is running)", icon="⏹️")
+        staging_containers = portainer_helpers.list_portainer_stack_containers(
+            host=resolved_portainer_host,
+            https_port=resolved_portainer_https_port,
+            insecure=resolved_portainer_webhook_insecure,
+            endpoint_id=resolved_portainer_endpoint_id,
+            access_token=resolved_portainer_access_token,
+            stack_name=staging_stack_name_for_stop,
+        )
+        if staging_containers:
+            stopped = portainer_helpers.set_portainer_stack_containers_state(
+                host=resolved_portainer_host,
+                https_port=resolved_portainer_https_port,
+                insecure=resolved_portainer_webhook_insecure,
+                endpoint_id=resolved_portainer_endpoint_id,
+                access_token=resolved_portainer_access_token,
+                stack_name=staging_stack_name_for_stop,
+                action="stop",
+            )
+            log_info(f"Stopped via Portainer stack {staging_stack_name_for_stop}: {', '.join(stopped)}")
+        else:
+            log_info("No staging containers to stop (not deployed yet).")
 
     # --- Post-deploy: stop staging containers (staging deploys create but don't run) ---
     if deploy_target == "staging" and not used_remote_compose_fallback:
@@ -1484,7 +1396,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     # --- Deploy tracking CSV ------------------------------------------------
     deploy_log.append_deploy_record(
         repo_root=repo_root,
-        target=deploy_target,
+        target="swap" if swap_requested else deploy_target,
         stack_name=resolved_portainer_stack_name,
         domain=resolved_public_domain,
         image=resolved_app_image,
@@ -1493,7 +1405,9 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
 
     version_str = deploy_log._read_app_version(repo_root)
     if deploy_target == "staging":
-        print(f"[ubuntu-deploy] ✅ Done. Staged to {deploy_target} (v{version_str}). Containers created but not started — use --swap to activate.")
+        print(f"[ubuntu-deploy] ✅ Done. Staged to {deploy_target} (v{version_str}). Containers created and stopped — use --swap to promote to production.")
+    elif swap_requested:
+        print(f"[ubuntu-deploy] ✅ Done. Promoted staging to production (v{version_str}). Production is running; staging is stopped.")
     else:
         print(f"[ubuntu-deploy] ✅ Done. Deployed to {deploy_target} (v{version_str}).")
 

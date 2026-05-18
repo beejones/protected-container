@@ -1,7 +1,8 @@
 """Deploy tracking CSV logger.
 
-Appends a row to `out/deploy/deploy_log.csv` after each deploy, recording
+Writes a row to `out/deploy/deploy_log.csv` after each deploy, recording
 the git ref, version, target environment, stack name, domain, image, and status.
+Newest records are stored directly under the CSV header.
 
 After a successful **production** deploy, auto-increments the patch component
 of APP_VERSION in `.env`.
@@ -101,7 +102,7 @@ def append_deploy_record(
     git_ref: str | None = None,
     version: str | None = None,
 ) -> Path:
-    """Append a deploy record to the CSV log.
+    """Write a deploy record to the CSV log.
 
     Returns the path to the CSV file.
     """
@@ -112,22 +113,29 @@ def append_deploy_record(
     resolved_version = version if version is not None else _read_app_version(repo_root)
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    write_header = not csv_path.exists() or csv_path.stat().st_size == 0
+    new_row = [
+        timestamp,
+        resolved_git_ref,
+        resolved_version,
+        target,
+        stack_name,
+        domain,
+        image,
+        status,
+    ]
 
-    with csv_path.open("a", newline="") as f:
+    existing_rows: list[list[str]] = []
+    if csv_path.exists() and csv_path.stat().st_size > 0:
+        with csv_path.open(newline="") as f:
+            rows = list(csv.reader(f))
+        if rows:
+            existing_rows = rows[1:] if rows[0] == CSV_COLUMNS else rows
+
+    with csv_path.open("w", newline="") as f:
         writer = csv.writer(f)
-        if write_header:
-            writer.writerow(CSV_COLUMNS)
-        writer.writerow([
-            timestamp,
-            resolved_git_ref,
-            resolved_version,
-            target,
-            stack_name,
-            domain,
-            image,
-            status,
-        ])
+        writer.writerow(CSV_COLUMNS)
+        writer.writerow(new_row)
+        writer.writerows(existing_rows)
 
     # Auto-increment patch version after successful production deploy
     if target == "production" and status == "success":
