@@ -79,6 +79,7 @@ class VarsEnum(str, Enum):
 
     # Runtime
     BASIC_AUTH_USER = "BASIC_AUTH_USER"
+    APP_VERSION = "APP_VERSION"
 
 
 class SecretsEnum(str, Enum):
@@ -151,6 +152,12 @@ RUNTIME_SCHEMA: tuple[EnvKeySpec, ...] = (
         mandatory=False,
         default="admin",
         targets=frozenset({EnvTarget.DOTENV_RUNTIME, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.APP_VERSION,
+        mandatory=False,
+        default="0.0.0",
+        targets=frozenset({EnvTarget.DOTENV_RUNTIME}),
     ),
 )
 

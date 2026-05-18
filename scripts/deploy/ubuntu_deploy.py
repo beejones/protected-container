@@ -30,6 +30,7 @@ sys.path.append(str(Path(__file__).parent))
 
 import caddy_register
 import deploy_hooks
+import deploy_log
 import portainer_helpers
 
 
@@ -1162,6 +1163,16 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             "storage_manager_api_url": resolved_storage_manager_api_url,
             "default_storage_registration_enabled": default_storage_registration_enabled,
         },
+    )
+
+    # --- Deploy tracking CSV ------------------------------------------------
+    deploy_log.append_deploy_record(
+        repo_root=repo_root,
+        target="production",
+        stack_name=resolved_portainer_stack_name,
+        domain=resolved_public_domain,
+        image=resolved_app_image,
+        status="success",
     )
 
     print("[ubuntu-deploy] ✅ Done.")
