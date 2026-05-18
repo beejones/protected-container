@@ -218,7 +218,7 @@ After swap:
 ### Checkable Tasks
 
 - [x] Modify staging deploy to mount production volumes (same volume names in compose)
-- [x] Staging deploy should NOT start containers (`docker compose up --no-start` or equivalent via Portainer)
+- [x] Staging deploy should leave containers stopped via Portainer API lifecycle
 - [x] `--prod` should start prod containers and stop staging containers if running
 - [x] `--swap` should:
   1. Stop production containers
