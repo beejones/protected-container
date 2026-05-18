@@ -100,6 +100,14 @@ def _find_site_block(caddyfile_text: str, site_label: str) -> tuple[int, int] | 
     return (start, pos)
 
 
+_SITE_LABEL_RE = re.compile(r"^(?!\s*#)\s*(\S+)\s*\{\s*$", re.MULTILINE)
+
+
+def _list_site_labels(caddyfile_text: str) -> list[str]:
+    """Return all top-level site labels found in the Caddyfile."""
+    return [m.group(1) for m in _SITE_LABEL_RE.finditer(caddyfile_text)]
+
+
 def _extract_upstream(site_block: str) -> str:
     """Extract the reverse_proxy upstream (service:port) from a site block."""
     m = _REVERSE_PROXY_RE.search(site_block)
@@ -233,7 +241,10 @@ def perform_swap(config: SwapConfig) -> SwapResult:
             staging_domain=config.staging_domain,
         )
     except ValueError as exc:
-        return SwapResult(success=False, message=str(exc))
+        # Add diagnostic: list site blocks found in the Caddyfile
+        site_labels = _list_site_labels(caddyfile_text)
+        diag = f" Found site blocks: {site_labels}" if site_labels else " No site blocks found in Caddyfile."
+        return SwapResult(success=False, message=f"{exc}{diag}")
 
     # Write the updated Caddyfile
     write_cmd = f"tee {shlex.quote(config.caddyfile_path)} > /dev/null"
