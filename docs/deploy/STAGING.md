@@ -5,28 +5,32 @@
 - Staging mirrors the production contract — same Compose files, hooks, and deploy script.
 - Only the target parameters differ: domain, remote dir, stack name.
 - Default deploy target is **staging** to prevent accidental production deploys.
-- Swap is a Caddy routing operation, not a container rebuild (zero-downtime).
+- Staging containers share production volumes but are **not started** on deploy.
+- Only one stack (production or staging) runs at a time to avoid volume conflicts.
+- Swap = stop active stack + start inactive stack + swap Caddy routing.
 
 ## Architecture
 
 ```
-┌────────────────────────────────────────────────────────┐
-│  Ubuntu Host                                           │
-│                                                        │
-│  ┌──────────────┐                                      │
-│  │ Central Caddy │──► production.domain → prod stack   │
-│  │  (ports 80,  │──► staging.domain    → staging stack │
-│  │   443)       │                                      │
-│  └──────────────┘                                      │
-│                                                        │
-│  ┌─────────────────────┐  ┌──────────────────────────┐ │
-│  │ protected-container │  │ protected-container-stg  │ │
-│  │ (production stack)  │  │ (staging stack)          │ │
-│  └─────────────────────┘  └──────────────────────────┘ │
-└────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Ubuntu Host                                                 │
+│                                                              │
+│  ┌──────────────┐                                            │
+│  │ Central Caddy │──► production.domain → active containers  │
+│  │  (ports 80,  │──► staging.domain    → active containers  │
+│  │   443)       │                                            │
+│  └──────────────┘                                            │
+│                                                              │
+│  ┌─────────────────────────┐  ┌────────────────────────────┐ │
+│  │ production stack        │  │ staging stack              │ │
+│  │ (running OR stopped)    │  │ (stopped OR running)       │ │
+│  │ Shared production       │  │ Shared production          │ │
+│  │ volumes                 │  │ volumes                    │ │
+│  └─────────────────────────┘  └────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-Both stacks are managed by Portainer on the same host. The centralized Caddy proxy routes traffic to each stack based on domain.
+Both stacks are managed by Portainer on the same host. Only one runs at a time. The centralized Caddy proxy routes traffic to whichever stack is active.
 
 ## Environment Setup
 
@@ -52,7 +56,7 @@ Staging is the default target:
 source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py
 ```
 
-This deploys using `STAGING_*` overrides for domain, remote dir, and stack name. All other settings (SSH host, compose files, hooks) are shared.
+This deploys using `STAGING_*` overrides for domain, remote dir, and stack name. Containers are **created but not started** — they're ready to be activated via `--swap`. All other settings (SSH host, compose files, hooks) are shared.
 
 ## Deploy to Production
 
@@ -62,23 +66,26 @@ Pass `--prod` to target production:
 source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py --prod
 ```
 
-A successful production deploy auto-increments `APP_VERSION` patch in `.env`.
+This starts production containers and stops any running staging containers. A successful production deploy auto-increments `APP_VERSION` patch in `.env`.
 
 ## Swap Production ↔ Staging
 
-Swap traffic between staging and production without restarting containers:
+Swap the active stack — stops the currently running containers and starts the other set:
 
 ```bash
 source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py --swap
 ```
 
 This:
-1. Reads the Caddyfile on the remote host
-2. Swaps `reverse_proxy` upstreams between the production and staging domains
-3. Reloads Caddy (zero-downtime)
-4. Logs a `swap` event to the deploy CSV
+1. Stops the production containers
+2. Starts the staging containers (using the same shared volumes)
+3. Swaps Caddy `reverse_proxy` upstreams so the production domain serves staging containers
+4. Reloads Caddy
+5. Logs a `swap` event to the deploy CSV
 
-**Rollback**: Run `--swap` again — it's symmetric.
+If the Caddy swap fails, the script automatically rolls back: stops staging, restarts production.
+
+**Rollback**: Run `--swap` again — it's symmetric (stops staging, starts production, swaps Caddy back).
 
 ## Deploy Tracking CSV
 

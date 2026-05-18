@@ -176,6 +176,60 @@ def build_remote_compose_deploy_cmd(*, remote_dir: Path, compose_files: list[str
     )
 
 
+def build_remote_compose_no_start_cmd(*, remote_dir: Path, compose_files: list[str]) -> str:
+    """Build a remote command that pulls images and creates containers without starting them."""
+    quoted_remote_dir = shlex.quote(str(remote_dir))
+    compose_args = " ".join(f"-f {shlex.quote(str(compose_file))}" for compose_file in compose_files)
+    return (
+        f"cd {quoted_remote_dir} && "
+        f"export ENV_DIR={quoted_remote_dir} && "
+        "if docker compose version >/dev/null 2>&1; then "
+        f"docker compose {compose_args} pull && docker compose {compose_args} up --no-start --remove-orphans; "
+        "elif command -v docker-compose >/dev/null 2>&1; then "
+        f"docker-compose {compose_args} pull && docker-compose {compose_args} up --no-start --remove-orphans; "
+        "else "
+        "echo '[ubuntu-deploy] Docker Compose is not installed on the remote host.' >&2; "
+        "exit 1; "
+        "fi"
+    )
+
+
+def build_remote_compose_stop_cmd(*, remote_dir: Path, compose_files: list[str]) -> str:
+    """Build a remote command that stops containers in a stack."""
+    quoted_remote_dir = shlex.quote(str(remote_dir))
+    compose_args = " ".join(f"-f {shlex.quote(str(compose_file))}" for compose_file in compose_files)
+    return (
+        f"cd {quoted_remote_dir} && "
+        f"export ENV_DIR={quoted_remote_dir} && "
+        "if docker compose version >/dev/null 2>&1; then "
+        f"docker compose {compose_args} stop; "
+        "elif command -v docker-compose >/dev/null 2>&1; then "
+        f"docker-compose {compose_args} stop; "
+        "else "
+        "echo '[ubuntu-deploy] Docker Compose is not installed on the remote host.' >&2; "
+        "exit 1; "
+        "fi"
+    )
+
+
+def build_remote_compose_start_cmd(*, remote_dir: Path, compose_files: list[str]) -> str:
+    """Build a remote command that starts existing (stopped) containers."""
+    quoted_remote_dir = shlex.quote(str(remote_dir))
+    compose_args = " ".join(f"-f {shlex.quote(str(compose_file))}" for compose_file in compose_files)
+    return (
+        f"cd {quoted_remote_dir} && "
+        f"export ENV_DIR={quoted_remote_dir} && "
+        "if docker compose version >/dev/null 2>&1; then "
+        f"docker compose {compose_args} start; "
+        "elif command -v docker-compose >/dev/null 2>&1; then "
+        f"docker-compose {compose_args} start; "
+        "else "
+        "echo '[ubuntu-deploy] Docker Compose is not installed on the remote host.' >&2; "
+        "exit 1; "
+        "fi"
+    )
+
+
 def _should_fallback_to_remote_compose(error_text: str) -> bool:
     lowered = str(error_text).lower()
     return "administrator initialization timeout" in lowered
@@ -690,21 +744,63 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         if not resolved_caddy_proxy_dir:
             resolved_caddy_proxy_dir = read_deploy_key(repo_root=repo_root, key=ENV_CADDY_PROXY_DIR)
 
-        # Determine remote dir for Caddyfile path
-        swap_remote_dir_raw = str(os.getenv(ENV_UBUNTU_REMOTE_DIR) or "").strip()
-        if not swap_remote_dir_raw:
-            swap_remote_dir_raw = read_deploy_key(repo_root=repo_root, key=ENV_UBUNTU_REMOTE_DIR)
-        if not swap_remote_dir_raw:
-            swap_remote_dir_raw = "/opt/protected-container"
-        swap_remote_dir = Path(swap_remote_dir_raw)
+        # Resolve production remote dir
+        prod_remote_dir_raw = str(os.getenv(ENV_UBUNTU_REMOTE_DIR) or "").strip()
+        if not prod_remote_dir_raw:
+            prod_remote_dir_raw = read_deploy_key(repo_root=repo_root, key=ENV_UBUNTU_REMOTE_DIR)
+        if not prod_remote_dir_raw:
+            prod_remote_dir_raw = "/opt/protected-container"
+        prod_remote_dir = Path(prod_remote_dir_raw)
 
-        proxy_repo_dir = Path(resolved_caddy_proxy_dir) if resolved_caddy_proxy_dir else (swap_remote_dir.parent / "protected-container")
+        # Resolve staging remote dir
+        staging_remote_dir_raw = str(os.getenv(ENV_STAGING_REMOTE_DIR) or "").strip()
+        if not staging_remote_dir_raw:
+            staging_remote_dir_raw = read_deploy_key(repo_root=repo_root, key=ENV_STAGING_REMOTE_DIR)
+        if not staging_remote_dir_raw:
+            raise SystemExit(
+                "[ubuntu-deploy] ❌ STAGING_REMOTE_DIR is not set. "
+                "Swap requires both production and staging directories. "
+                "Set STAGING_REMOTE_DIR in .env.deploy."
+            )
+        staging_remote_dir = Path(staging_remote_dir_raw)
+
+        # Resolve compose files for both stacks
+        swap_compose_files_raw = str(os.getenv(ENV_UBUNTU_COMPOSE_FILES) or "").strip()
+        if not swap_compose_files_raw:
+            swap_compose_files_raw = read_deploy_key(repo_root=repo_root, key=ENV_UBUNTU_COMPOSE_FILES)
+        swap_compose_files = [f.strip() for f in swap_compose_files_raw.split(",") if f.strip()] if swap_compose_files_raw else ["docker/docker-compose.yml"]
+
+        proxy_repo_dir = Path(resolved_caddy_proxy_dir) if resolved_caddy_proxy_dir else (prod_remote_dir.parent / "protected-container")
         caddyfile_path = str(proxy_repo_dir / "docker" / "proxy" / "Caddyfile")
 
-        log_step("Swapping staging ↔ production routing", icon="🔄")
+        log_step("Swapping staging ↔ production", icon="🔄")
         log_info(f"Production domain: {prod_domain}")
         log_info(f"Staging domain: {staging_domain}")
 
+        # Step: Stop production containers
+        log_step("Stopping production containers", icon="⏹️")
+        log_info(f"Remote dir: {prod_remote_dir}")
+        _run(
+            build_ssh_cmd(
+                host=resolved_host,
+                remote_command=build_remote_compose_stop_cmd(remote_dir=prod_remote_dir, compose_files=swap_compose_files),
+            ),
+            action="Failed to stop production containers",
+        )
+
+        # Step: Start staging containers
+        log_step("Starting staging containers", icon="▶️")
+        log_info(f"Remote dir: {staging_remote_dir}")
+        _run(
+            build_ssh_cmd(
+                host=resolved_host,
+                remote_command=build_remote_compose_start_cmd(remote_dir=staging_remote_dir, compose_files=swap_compose_files),
+            ),
+            action="Failed to start staging containers",
+        )
+
+        # Step: Swap Caddy routing
+        log_step("Swapping Caddy routing", icon="🔀")
         swap_config = swap_environment.SwapConfig(
             ssh_host=resolved_host,
             caddyfile_path=caddyfile_path,
@@ -714,6 +810,22 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         swap_result = swap_environment.perform_swap(swap_config)
 
         if not swap_result.success:
+            # Attempt rollback: stop staging, restart production
+            log_info("Caddy swap failed — rolling back container state", icon="⚠️")
+            _run(
+                build_ssh_cmd(
+                    host=resolved_host,
+                    remote_command=build_remote_compose_stop_cmd(remote_dir=staging_remote_dir, compose_files=swap_compose_files),
+                ),
+                action="Failed to stop staging containers during rollback",
+            )
+            _run(
+                build_ssh_cmd(
+                    host=resolved_host,
+                    remote_command=build_remote_compose_start_cmd(remote_dir=prod_remote_dir, compose_files=swap_compose_files),
+                ),
+                action="Failed to restart production containers during rollback",
+            )
             raise SystemExit(f"Swap failed: {swap_result.message}")
 
         log_info(f"Production upstream: {swap_result.prod_upstream_before} → {swap_result.prod_upstream_after}")
@@ -728,7 +840,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             status="success",
         )
 
-        print("[ubuntu-deploy] ✅ Swap complete.")
+        print("[ubuntu-deploy] ✅ Swap complete. Production domain now serves staging containers.")
         return
 
     resolved_remote_dir = str(args.remote_dir or "").strip()
@@ -1090,6 +1202,27 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     else:
         log_info("Central proxy is already running.")
 
+    # --- Production deploy: stop staging containers if running ---------------
+    if deploy_target == "production":
+        staging_dir_raw = str(os.getenv(ENV_STAGING_REMOTE_DIR) or "").strip()
+        if not staging_dir_raw:
+            staging_dir_raw = read_deploy_key(repo_root=repo_root, key=ENV_STAGING_REMOTE_DIR)
+        if staging_dir_raw:
+            log_step("Stopping staging containers (production takes over)", icon="⏹️")
+            # Use check=False equivalent — don't fail if staging isn't deployed yet
+            stop_result = subprocess.run(
+                build_ssh_cmd(
+                    host=resolved_host,
+                    remote_command=build_remote_compose_stop_cmd(remote_dir=Path(staging_dir_raw), compose_files=compose_files),
+                ),
+                capture_output=True,
+                text=True,
+            )
+            if stop_result.returncode == 0:
+                log_info("Staging containers stopped.")
+            else:
+                log_info("No staging containers to stop (not deployed yet).", icon="ℹ️")
+
     used_remote_compose_fallback = False
 
     if has_portainer_api_auth:
@@ -1120,14 +1253,24 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             )
 
     if used_remote_compose_fallback:
-        log_step("Deploying stack directly with Docker Compose over SSH", icon="🐳")
-        _run(
-            build_ssh_cmd(
-                host=resolved_host,
-                remote_command=build_remote_compose_deploy_cmd(remote_dir=remote_dir, compose_files=compose_files),
-            ),
-            action="Failed direct Docker Compose deployment on the remote host",
-        )
+        if deploy_target == "staging":
+            log_step("Deploying staging stack (containers created but not started)", icon="🐳")
+            _run(
+                build_ssh_cmd(
+                    host=resolved_host,
+                    remote_command=build_remote_compose_no_start_cmd(remote_dir=remote_dir, compose_files=compose_files),
+                ),
+                action="Failed direct Docker Compose deployment on the remote host",
+            )
+        else:
+            log_step("Deploying stack directly with Docker Compose over SSH", icon="🐳")
+            _run(
+                build_ssh_cmd(
+                    host=resolved_host,
+                    remote_command=build_remote_compose_deploy_cmd(remote_dir=remote_dir, compose_files=compose_files),
+                ),
+                action="Failed direct Docker Compose deployment on the remote host",
+            )
     elif has_portainer_api_auth:
         log_step("Deploying stack through Portainer API", icon="🌐")
         try:
@@ -1172,6 +1315,17 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             urls=webhook_urls,
             insecure=resolved_portainer_webhook_insecure,
             has_api_auth=has_portainer_api_auth,
+        )
+
+    # --- Post-deploy: stop staging containers (staging deploys create but don't run) ---
+    if deploy_target == "staging" and not used_remote_compose_fallback:
+        log_step("Stopping staging containers (staging is pre-deployed, not started)", icon="⏹️")
+        _run(
+            build_ssh_cmd(
+                host=resolved_host,
+                remote_command=build_remote_compose_stop_cmd(remote_dir=remote_dir, compose_files=compose_files),
+            ),
+            action="Failed to stop staging containers after deploy",
         )
 
     # --- Post-deploy: register with centralized Caddy proxy ----------------
@@ -1287,7 +1441,11 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         status="success",
     )
 
-    print(f"[ubuntu-deploy] ✅ Done. Deployed to {deploy_target} (v{deploy_log._read_app_version(repo_root)}).")
+    version_str = deploy_log._read_app_version(repo_root)
+    if deploy_target == "staging":
+        print(f"[ubuntu-deploy] ✅ Done. Staged to {deploy_target} (v{version_str}). Containers created but not started — use --swap to activate.")
+    else:
+        print(f"[ubuntu-deploy] ✅ Done. Deployed to {deploy_target} (v{version_str}).")
 
 
 if __name__ == "__main__":
