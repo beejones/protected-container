@@ -669,6 +669,68 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         raise SystemExit("Missing SSH host: provide --host, set UBUNTU_SSH_HOST, or add UBUNTU_SSH_HOST to .env.deploy")
     resolved_portainer_host = resolve_network_host_from_ssh_target(resolved_host)
 
+    # --- Handle --swap: short-circuit before normal deploy ------------------
+    if deploy_target == "swap":
+        import swap_environment
+
+        prod_domain = str(os.getenv(ENV_PUBLIC_DOMAIN) or "").strip()
+        if not prod_domain:
+            prod_domain = read_deploy_key(repo_root=repo_root, key=ENV_PUBLIC_DOMAIN)
+        staging_domain = str(os.getenv(ENV_STAGING_PUBLIC_DOMAIN) or "").strip()
+        if not staging_domain:
+            staging_domain = read_deploy_key(repo_root=repo_root, key=ENV_STAGING_PUBLIC_DOMAIN)
+
+        if not prod_domain or not staging_domain:
+            raise SystemExit(
+                "Both PUBLIC_DOMAIN and STAGING_PUBLIC_DOMAIN must be set for --swap. "
+                "Set them in .env.deploy."
+            )
+
+        resolved_caddy_proxy_dir = str(os.getenv(ENV_CADDY_PROXY_DIR) or "").strip()
+        if not resolved_caddy_proxy_dir:
+            resolved_caddy_proxy_dir = read_deploy_key(repo_root=repo_root, key=ENV_CADDY_PROXY_DIR)
+
+        # Determine remote dir for Caddyfile path
+        swap_remote_dir_raw = str(os.getenv(ENV_UBUNTU_REMOTE_DIR) or "").strip()
+        if not swap_remote_dir_raw:
+            swap_remote_dir_raw = read_deploy_key(repo_root=repo_root, key=ENV_UBUNTU_REMOTE_DIR)
+        if not swap_remote_dir_raw:
+            swap_remote_dir_raw = "/opt/protected-container"
+        swap_remote_dir = Path(swap_remote_dir_raw)
+
+        proxy_repo_dir = Path(resolved_caddy_proxy_dir) if resolved_caddy_proxy_dir else (swap_remote_dir.parent / "protected-container")
+        caddyfile_path = str(proxy_repo_dir / "docker" / "proxy" / "Caddyfile")
+
+        log_step("Swapping staging ↔ production routing", icon="🔄")
+        log_info(f"Production domain: {prod_domain}")
+        log_info(f"Staging domain: {staging_domain}")
+
+        swap_config = swap_environment.SwapConfig(
+            ssh_host=resolved_host,
+            caddyfile_path=caddyfile_path,
+            production_domain=prod_domain,
+            staging_domain=staging_domain,
+        )
+        swap_result = swap_environment.perform_swap(swap_config)
+
+        if not swap_result.success:
+            raise SystemExit(f"Swap failed: {swap_result.message}")
+
+        log_info(f"Production upstream: {swap_result.prod_upstream_before} → {swap_result.prod_upstream_after}")
+        log_info(f"Staging upstream: {swap_result.staging_upstream_before} → {swap_result.staging_upstream_after}")
+
+        deploy_log.append_deploy_record(
+            repo_root=repo_root,
+            target="swap",
+            stack_name="",
+            domain=prod_domain,
+            image="",
+            status="success",
+        )
+
+        print("[ubuntu-deploy] ✅ Swap complete.")
+        return
+
     resolved_remote_dir = str(args.remote_dir or "").strip()
     if not resolved_remote_dir:
         # Staging overrides: use STAGING_REMOTE_DIR when deploying to staging
