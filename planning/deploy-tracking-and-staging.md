@@ -3,9 +3,33 @@
 ## Principles
 
 - **Deploy history is observable**: Every successful deploy appends a row to a CSV log so operators can trace exactly what was deployed and when.
+- **Git commit is the rollback anchor**: The CSV records the **full 40-char commit SHA** (`git rev-parse HEAD`) so you can always `git checkout <sha>` to reproduce exactly what was deployed.
+- **Version lives in `.env` as `APP_VERSION`**: Format `x.y.z` (semver). The deploy script reads it, logs it to the CSV, and optionally auto-increments the patch (`z`) after a successful production deploy. Staging deploys log the version but do NOT auto-increment.
+- **CSV columns and their purpose**:
+  | Column | Value | Why |
+  |--------|-------|-----|
+  | `timestamp` | ISO 8601 UTC (`2026-05-18T14:30:00Z`) | When the deploy happened |
+  | `git_ref` | Full SHA (`a1b2c3d4e5f6...`) | Exact code state — use for rollback checkout |
+  | `version` | `1.2.3` from `.env` `APP_VERSION` | Human-readable release label |
+  | `target` | `production` / `staging` / `swap` | Which environment was affected |
+  | `stack_name` | Portainer stack name | Which stack was deployed |
+  | `domain` | Public domain for this deploy | Which URL serves this release |
+  | `image` | `ghcr.io/.../...:latest` | Exact container image deployed |
+  | `status` | `success` / `failed` | Outcome | 
 - **Staging mirrors production contract**: Staging uses the same Compose files, hooks, and deploy script as production — only the target parameters differ (domain, remote dir, stack name).
+- **Portainer manages both stacks**: Staging is a second Portainer stack on the same host (e.g. `protected-container-staging`). Portainer UI shows both stacks side-by-side. The deploy script creates/updates the staging stack via the same Portainer API path — just with different `PORTAINER_STACK_NAME` and `UBUNTU_REMOTE_DIR`. You can also inspect, restart, or roll back individual stacks directly from the Portainer web UI.
 - **Swap is a traffic operation, not a re-deploy**: Switching between staging and production is a Caddy routing change, not a container rebuild.
 - **No hardcoded staging logic in core scripts**: Staging is expressed through env profiles and a lightweight swap utility, not a parallel deploy code path.
+- **Swap is a script operation on Caddy routing** (not Portainer):
+  1. Run `python scripts/deploy/swap_environment.py` (or `ubuntu_deploy.py --swap`)
+  2. Script SSHs into the host, verifies both stacks are healthy via `docker ps`
+  3. Rewrites the Caddyfile: production domain → staging container upstream, staging domain → production container upstream
+  4. Reloads Caddy (`docker exec central-proxy caddy reload`)
+  5. Logs a `swap` event to the deploy CSV
+  
+  **Why not Portainer for the swap?** Portainer manages container lifecycle, but traffic routing lives in Caddy. Swapping in Portainer would mean redeploying both stacks with different domains — slower, riskier, causes downtime. The Caddy rewrite is instant and zero-downtime.
+  
+  **Rollback**: Run the swap script again — it's symmetric. Or manually edit the Caddyfile via SSH if something goes wrong.
 - **Existing deploy contracts preserved**: ubuntu_deploy.py remains the single entry point; staging vs production is a parameter concern.
 
 ---
@@ -20,7 +44,7 @@
 - Local Docker: no impact (staging is an ubuntu-deploy concern)
 - Azure deploy: no impact initially (can be extended later)
 - Hooks: `post_deploy` hook already exists; CSV logging fires after it
-
+- `docs/deploy/STAGING.md` — **primary reference for downstream/relying projects**: explains how to configure staging, deploy to it, swap traffic, and read the deploy CSV. Written for operators who clone this toolkit into their own project.
 ---
 
 ## Checkable Task Overview
@@ -32,15 +56,19 @@
 - [ ] Verify existing tests pass after cleanup (`pytest -q`)
 
 ### Phase 1 — Deploy Tracking CSV (`out/deploy/deploy_log.csv`)
+- [ ] Add `APP_VERSION=0.1.0` to `.env` (runtime config, read at deploy time)
+- [ ] Add `APP_VERSION` to `env_schema.py` RUNTIME_SCHEMA (optional, default `0.0.0`)
 - [ ] Create `scripts/deploy/deploy_log.py` with:
-  - `append_deploy_record(repo_root, git_ref, version, target, extra_metadata)` → appends a row
-  - CSV columns: `timestamp,git_ref,version,target,stack_name,domain,status`
+  - `append_deploy_record(repo_root, git_ref, version, target, stack_name, domain, image, status)` → appends a row
+  - CSV columns: `timestamp,git_ref,version,target,stack_name,domain,image,status`
   - Auto-creates `out/deploy/` directory if missing
-  - Reads git ref from `git rev-parse --short HEAD` when not provided
-  - Version sourced from a `VERSION` file or git tag (fallback: git ref)
+  - `git_ref` = full 40-char SHA from `git rev-parse HEAD`
+  - `version` = read from `.env` key `APP_VERSION`
+  - After successful **production** deploy: auto-increment patch in `.env` (`1.2.3` → `1.2.4`) so next deploy gets a new version
+  - Staging deploys: log current version but do NOT increment
 - [ ] Integrate `append_deploy_record` call at end of `ubuntu_deploy.py` main() after `"✅ Done"` message
 - [ ] Add `out/deploy/` to `.gitignore` (tracking CSV is local state, not committed)
-- [ ] Write unit tests for `deploy_log.py` (CSV creation, append, column integrity)
+- [ ] Write unit tests for `deploy_log.py` (CSV creation, append, column integrity, version increment)
 
 ### Phase 2 — Staging Environment Support
 - [ ] Add optional env keys to `env_schema.py`:
@@ -101,11 +129,13 @@
 ### CSV Format
 
 ```csv
-timestamp,git_ref,version,target,stack_name,domain,status
-2026-05-18T14:30:00Z,abc1234,1.2.0,production,protected-container,protected-container.zenia.eu,success
-2026-05-18T15:00:00Z,abc1234,1.2.0,staging,protected-container-staging,staging.zenia.eu,success
-2026-05-18T15:05:00Z,abc1234,1.2.0,swap,protected-container,protected-container.zenia.eu,success
+timestamp,git_ref,version,target,stack_name,domain,image,status
+2026-05-18T14:30:00Z,a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2,1.2.3,production,protected-container,protected-container.zenia.eu,ghcr.io/beejones/protected-container:latest,success
+2026-05-18T15:00:00Z,a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2,1.2.3,staging,protected-container-staging,staging.zenia.eu,ghcr.io/beejones/protected-container:latest,success
+2026-05-18T15:05:00Z,a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2,1.2.3,swap,protected-container,protected-container.zenia.eu,,success
 ```
+
+**Reading the CSV for rollback**: Find the last `production` + `success` row, use `git_ref` to checkout that exact commit, redeploy.
 
 ### Staging Architecture
 
