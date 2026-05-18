@@ -738,6 +738,12 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             resolved_remote_dir = str(os.getenv(ENV_STAGING_REMOTE_DIR) or "").strip()
             if not resolved_remote_dir:
                 resolved_remote_dir = read_deploy_key(repo_root=repo_root, key=ENV_STAGING_REMOTE_DIR)
+            if not resolved_remote_dir:
+                raise SystemExit(
+                    f"[ubuntu-deploy] ❌ STAGING_REMOTE_DIR is not set. "
+                    f"Staging deploys require a separate directory from production. "
+                    f"Set STAGING_REMOTE_DIR in .env.deploy (e.g. /home/user/containers/staging-myapp)."
+                )
         if not resolved_remote_dir:
             resolved_remote_dir = str(os.getenv(ENV_UBUNTU_REMOTE_DIR) or "").strip()
         if not resolved_remote_dir:
@@ -828,6 +834,12 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         resolved_portainer_stack_name = str(os.getenv(ENV_STAGING_PORTAINER_STACK_NAME) or "").strip()
         if not resolved_portainer_stack_name:
             resolved_portainer_stack_name = read_deploy_key(repo_root=repo_root, key=ENV_STAGING_PORTAINER_STACK_NAME)
+        if not resolved_portainer_stack_name:
+            raise SystemExit(
+                f"[ubuntu-deploy] ❌ STAGING_PORTAINER_STACK_NAME is not set. "
+                f"Staging deploys require a separate stack name from production. "
+                f"Set STAGING_PORTAINER_STACK_NAME in .env.deploy (e.g. staging-myapp)."
+            )
     if not resolved_portainer_stack_name:
         resolved_portainer_stack_name = str(os.getenv(ENV_PORTAINER_STACK_NAME) or "").strip()
     if not resolved_portainer_stack_name:
