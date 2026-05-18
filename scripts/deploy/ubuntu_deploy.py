@@ -310,6 +310,35 @@ def prepare_stack_content_for_portainer(*, stack_content: str, app_image: str) -
     return yaml.safe_dump(payload, sort_keys=False)
 
 
+def rewrite_staging_container_names_for_portainer(*, stack_content: str, stack_name: str) -> str:
+    """Rewrite explicit container_name values so a staging stack can coexist with production."""
+    payload = yaml.safe_load(stack_content)
+    if not isinstance(payload, dict):
+        raise SystemExit("Rendered compose config is not a valid mapping")
+
+    services = payload.get("services")
+    if not isinstance(services, dict):
+        return stack_content
+
+    resolved_stack_name = stack_name.strip()
+    if not resolved_stack_name:
+        return stack_content
+
+    for service_name, service_payload in services.items():
+        if not isinstance(service_payload, dict):
+            continue
+        existing_name = str(service_payload.get("container_name") or "").strip()
+        if not existing_name:
+            continue
+        deploy_role = str(service_payload.get("x-deploy-role") or "").strip()
+        if service_name == "app" or deploy_role == "app":
+            service_payload["container_name"] = resolved_stack_name
+        else:
+            service_payload["container_name"] = f"{resolved_stack_name}-{service_name}"
+
+    return yaml.safe_dump(payload, sort_keys=False)
+
+
 def extract_stack_images(*, stack_content: str) -> list[str]:
     payload = yaml.safe_load(stack_content)
     if not isinstance(payload, dict):
@@ -792,6 +821,43 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             swap_compose_files_raw = read_deploy_key(repo_root=repo_root, key=ENV_UBUNTU_COMPOSE_FILES)
         swap_compose_files = [f.strip() for f in swap_compose_files_raw.split(",") if f.strip()] if swap_compose_files_raw else ["docker/docker-compose.yml"]
 
+        prod_stack_name = str(os.getenv(ENV_PORTAINER_STACK_NAME) or "").strip()
+        if not prod_stack_name:
+            prod_stack_name = read_deploy_key(repo_root=repo_root, key=ENV_PORTAINER_STACK_NAME)
+        if not prod_stack_name:
+            prod_stack_name = prod_remote_dir.name
+
+        staging_stack_name = str(os.getenv(ENV_STAGING_PORTAINER_STACK_NAME) or "").strip()
+        if not staging_stack_name:
+            staging_stack_name = read_deploy_key(repo_root=repo_root, key=ENV_STAGING_PORTAINER_STACK_NAME)
+        if not staging_stack_name:
+            raise SystemExit(
+                "[ubuntu-deploy] ❌ STAGING_PORTAINER_STACK_NAME is not set. "
+                "Swap requires the staging Portainer stack name."
+            )
+
+        swap_portainer_https_port_raw = str(os.getenv(ENV_PORTAINER_HTTPS_PORT) or "").strip()
+        if not swap_portainer_https_port_raw:
+            swap_portainer_https_port_raw = read_deploy_key(repo_root=repo_root, key=ENV_PORTAINER_HTTPS_PORT)
+        try:
+            swap_portainer_https_port = int(swap_portainer_https_port_raw or "9943")
+        except ValueError:
+            raise SystemExit("PORTAINER_HTTPS_PORT must be an integer")
+
+        swap_webhook_insecure_raw = str(os.getenv(ENV_PORTAINER_WEBHOOK_INSECURE) or "").strip()
+        if not swap_webhook_insecure_raw:
+            swap_webhook_insecure_raw = read_deploy_key(repo_root=repo_root, key=ENV_PORTAINER_WEBHOOK_INSECURE)
+        swap_portainer_insecure = parse_boolish(swap_webhook_insecure_raw, default=False)
+
+        swap_portainer_endpoint_id = str(os.getenv(ENV_PORTAINER_ENDPOINT_ID) or "").strip()
+        if not swap_portainer_endpoint_id:
+            swap_portainer_endpoint_id = read_deploy_key(repo_root=repo_root, key=ENV_PORTAINER_ENDPOINT_ID)
+
+        swap_portainer_access_token = str(os.getenv(ENV_PORTAINER_ACCESS_TOKEN) or "").strip()
+        if not swap_portainer_access_token:
+            swap_portainer_access_token = read_deploy_secret_key(repo_root=repo_root, key=ENV_PORTAINER_ACCESS_TOKEN)
+        use_portainer_lifecycle = bool(swap_portainer_access_token)
+
         proxy_repo_dir = Path(resolved_caddy_proxy_dir) if resolved_caddy_proxy_dir else (prod_remote_dir.parent / "protected-container")
         caddyfile_path = str(proxy_repo_dir / "docker" / "proxy" / "Caddyfile")
 
@@ -800,53 +866,106 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         log_info(f"Staging domain: {staging_domain}")
 
         log_step("Verifying staging containers exist", icon="🔎")
-        log_info(f"Remote dir: {staging_remote_dir}")
-        _run(
-            build_ssh_cmd(
-                host=resolved_host,
-                remote_command=build_remote_compose_require_containers_cmd(
-                    remote_dir=staging_remote_dir,
-                    compose_files=swap_compose_files,
+        if use_portainer_lifecycle:
+            staging_containers = portainer_helpers.list_portainer_stack_containers(
+                host=resolved_portainer_host,
+                https_port=swap_portainer_https_port,
+                insecure=swap_portainer_insecure,
+                endpoint_id=swap_portainer_endpoint_id,
+                access_token=swap_portainer_access_token,
+                stack_name=staging_stack_name,
+            )
+            if not staging_containers:
+                raise SystemExit(
+                    "Staging containers are not ready for swap. "
+                    "Run `source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py` first."
+                )
+            log_info(f"Portainer stack: {staging_stack_name} ({len(staging_containers)} containers)")
+        else:
+            log_info(f"Remote dir: {staging_remote_dir}")
+            _run(
+                build_ssh_cmd(
+                    host=resolved_host,
+                    remote_command=build_remote_compose_require_containers_cmd(
+                        remote_dir=staging_remote_dir,
+                        compose_files=swap_compose_files,
+                    ),
                 ),
-            ),
-            action=(
-                "Staging containers are not ready for swap. "
-                "Run `source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py` first"
-            ),
-        )
+                action=(
+                    "Staging containers are not ready for swap. "
+                    "Run `source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py` first"
+                ),
+            )
 
         # Step: Stop production containers
         log_step("Stopping production containers", icon="⏹️")
-        log_info(f"Remote dir: {prod_remote_dir}")
-        _run(
-            build_ssh_cmd(
-                host=resolved_host,
-                remote_command=build_remote_compose_stop_cmd(remote_dir=prod_remote_dir, compose_files=swap_compose_files),
-            ),
-            action="Failed to stop production containers",
-        )
+        if use_portainer_lifecycle:
+            stopped = portainer_helpers.set_portainer_stack_containers_state(
+                host=resolved_portainer_host,
+                https_port=swap_portainer_https_port,
+                insecure=swap_portainer_insecure,
+                endpoint_id=swap_portainer_endpoint_id,
+                access_token=swap_portainer_access_token,
+                stack_name=prod_stack_name,
+                action="stop",
+            )
+            log_info(f"Stopped via Portainer stack {prod_stack_name}: {', '.join(stopped)}")
+        else:
+            log_info(f"Remote dir: {prod_remote_dir}")
+            _run(
+                build_ssh_cmd(
+                    host=resolved_host,
+                    remote_command=build_remote_compose_stop_cmd(remote_dir=prod_remote_dir, compose_files=swap_compose_files),
+                ),
+                action="Failed to stop production containers",
+            )
 
         # Step: Start staging containers
         log_step("Starting staging containers", icon="▶️")
-        log_info(f"Remote dir: {staging_remote_dir}")
-        try:
-            _run(
-                build_ssh_cmd(
-                    host=resolved_host,
-                    remote_command=build_remote_compose_start_cmd(remote_dir=staging_remote_dir, compose_files=swap_compose_files),
-                ),
-                action="Failed to start staging containers",
-            )
-        except SystemExit:
-            log_info("Starting staging failed — restarting production containers", icon="⚠️")
-            _run(
-                build_ssh_cmd(
-                    host=resolved_host,
-                    remote_command=build_remote_compose_start_cmd(remote_dir=prod_remote_dir, compose_files=swap_compose_files),
-                ),
-                action="Failed to restart production containers after staging start failure",
-            )
-            raise
+        if use_portainer_lifecycle:
+            try:
+                started = portainer_helpers.set_portainer_stack_containers_state(
+                    host=resolved_portainer_host,
+                    https_port=swap_portainer_https_port,
+                    insecure=swap_portainer_insecure,
+                    endpoint_id=swap_portainer_endpoint_id,
+                    access_token=swap_portainer_access_token,
+                    stack_name=staging_stack_name,
+                    action="start",
+                )
+                log_info(f"Started via Portainer stack {staging_stack_name}: {', '.join(started)}")
+            except SystemExit:
+                log_info("Starting staging failed — restarting production containers", icon="⚠️")
+                portainer_helpers.set_portainer_stack_containers_state(
+                    host=resolved_portainer_host,
+                    https_port=swap_portainer_https_port,
+                    insecure=swap_portainer_insecure,
+                    endpoint_id=swap_portainer_endpoint_id,
+                    access_token=swap_portainer_access_token,
+                    stack_name=prod_stack_name,
+                    action="start",
+                )
+                raise
+        else:
+            log_info(f"Remote dir: {staging_remote_dir}")
+            try:
+                _run(
+                    build_ssh_cmd(
+                        host=resolved_host,
+                        remote_command=build_remote_compose_start_cmd(remote_dir=staging_remote_dir, compose_files=swap_compose_files),
+                    ),
+                    action="Failed to start staging containers",
+                )
+            except SystemExit:
+                log_info("Starting staging failed — restarting production containers", icon="⚠️")
+                _run(
+                    build_ssh_cmd(
+                        host=resolved_host,
+                        remote_command=build_remote_compose_start_cmd(remote_dir=prod_remote_dir, compose_files=swap_compose_files),
+                    ),
+                    action="Failed to restart production containers after staging start failure",
+                )
+                raise
 
         # Step: Swap Caddy routing
         log_step("Swapping Caddy routing", icon="🔀")
@@ -861,20 +980,40 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         if not swap_result.success:
             # Attempt rollback: stop staging, restart production
             log_info("Caddy swap failed — rolling back container state", icon="⚠️")
-            _run(
-                build_ssh_cmd(
-                    host=resolved_host,
-                    remote_command=build_remote_compose_stop_cmd(remote_dir=staging_remote_dir, compose_files=swap_compose_files),
-                ),
-                action="Failed to stop staging containers during rollback",
-            )
-            _run(
-                build_ssh_cmd(
-                    host=resolved_host,
-                    remote_command=build_remote_compose_start_cmd(remote_dir=prod_remote_dir, compose_files=swap_compose_files),
-                ),
-                action="Failed to restart production containers during rollback",
-            )
+            if use_portainer_lifecycle:
+                portainer_helpers.set_portainer_stack_containers_state(
+                    host=resolved_portainer_host,
+                    https_port=swap_portainer_https_port,
+                    insecure=swap_portainer_insecure,
+                    endpoint_id=swap_portainer_endpoint_id,
+                    access_token=swap_portainer_access_token,
+                    stack_name=staging_stack_name,
+                    action="stop",
+                )
+                portainer_helpers.set_portainer_stack_containers_state(
+                    host=resolved_portainer_host,
+                    https_port=swap_portainer_https_port,
+                    insecure=swap_portainer_insecure,
+                    endpoint_id=swap_portainer_endpoint_id,
+                    access_token=swap_portainer_access_token,
+                    stack_name=prod_stack_name,
+                    action="start",
+                )
+            else:
+                _run(
+                    build_ssh_cmd(
+                        host=resolved_host,
+                        remote_command=build_remote_compose_stop_cmd(remote_dir=staging_remote_dir, compose_files=swap_compose_files),
+                    ),
+                    action="Failed to stop staging containers during rollback",
+                )
+                _run(
+                    build_ssh_cmd(
+                        host=resolved_host,
+                        remote_command=build_remote_compose_start_cmd(remote_dir=prod_remote_dir, compose_files=swap_compose_files),
+                    ),
+                    action="Failed to restart production containers during rollback",
+                )
             raise SystemExit(f"Swap failed: {swap_result.message}")
 
         log_info(f"Production upstream: {swap_result.prod_upstream_before} → {swap_result.prod_upstream_after}")
@@ -1095,6 +1234,11 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         stack_content=stack_file_content_remote,
         app_image=resolved_app_image,
     )
+    if deploy_target == "staging":
+        stack_file_content = rewrite_staging_container_names_for_portainer(
+            stack_content=stack_file_content,
+            stack_name=resolved_portainer_stack_name,
+        )
     stack_includes_storage_manager = stack_has_service(
         stack_content=stack_file_content,
         service_name="storage-manager",
@@ -1369,13 +1513,16 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     # --- Post-deploy: stop staging containers (staging deploys create but don't run) ---
     if deploy_target == "staging" and not used_remote_compose_fallback:
         log_step("Stopping staging containers (staging is pre-deployed, not started)", icon="⏹️")
-        _run(
-            build_ssh_cmd(
-                host=resolved_host,
-                remote_command=build_remote_compose_stop_cmd(remote_dir=remote_dir, compose_files=compose_files),
-            ),
-            action="Failed to stop staging containers after deploy",
+        stopped = portainer_helpers.set_portainer_stack_containers_state(
+            host=resolved_portainer_host,
+            https_port=resolved_portainer_https_port,
+            insecure=resolved_portainer_webhook_insecure,
+            endpoint_id=resolved_portainer_endpoint_id,
+            access_token=resolved_portainer_access_token,
+            stack_name=resolved_portainer_stack_name,
+            action="stop",
         )
+        log_info(f"Stopped via Portainer stack {resolved_portainer_stack_name}: {', '.join(stopped)}")
 
     # --- Post-deploy: register with centralized Caddy proxy ----------------
     resolved_public_domain = ""

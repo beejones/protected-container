@@ -30,7 +30,7 @@
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Both stacks are managed by Portainer on the same host. Only one runs at a time. The centralized Caddy proxy routes traffic to whichever stack is active.
+Both stacks are managed by Portainer on the same host. Only one runs at a time. The centralized Caddy proxy routes traffic to whichever stack is active. When a staging stack is rendered for Portainer, explicit `container_name` values are rewritten to avoid collisions with production (for example, `protected-container` becomes the staging stack name).
 
 ## Environment Setup
 
@@ -56,7 +56,7 @@ Staging is the default target:
 source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py
 ```
 
-This deploys using `STAGING_*` overrides for domain, remote dir, and stack name. Containers are **created but not started** — they're ready to be activated via `--swap`. All other settings (SSH host, compose files, hooks) are shared.
+This deploys using `STAGING_*` overrides for domain, remote dir, and stack name. Containers are **created and then stopped via Portainer API** — they're ready to be activated via `--swap`. All other settings (SSH host, compose files, hooks) are shared.
 
 ## Deploy to Production
 
@@ -77,11 +77,12 @@ source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py --swap
 ```
 
 This:
-1. Stops the production containers
-2. Starts the staging containers (using the same shared volumes)
-3. Swaps Caddy `reverse_proxy` upstreams so the production domain serves staging containers
-4. Reloads Caddy
-5. Logs a `swap` event to the deploy CSV
+1. Verifies the staging Portainer stack has containers
+2. Stops the production stack containers via Portainer API
+3. Starts the staging stack containers via Portainer API
+4. Swaps Caddy `reverse_proxy` upstreams so the production domain serves staging containers
+5. Reloads Caddy
+6. Logs a `swap` event to the deploy CSV
 
 If the Caddy swap fails, the script automatically rolls back: stops staging, restarts production.
 

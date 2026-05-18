@@ -21,6 +21,7 @@ from scripts.deploy.ubuntu_deploy import (
     register_storage_manager_registrations,
     resolve_network_host_from_ssh_target,
     rewrite_rendered_paths_for_remote,
+    rewrite_staging_container_names_for_portainer,
     stack_has_service,
     main,
     read_deploy_key,
@@ -34,7 +35,9 @@ from scripts.deploy.portainer_helpers import (
     build_portainer_webhook_url,
     extract_ssh_hostname,
     is_portainer_access_token_valid,
+    list_portainer_stack_containers,
     portainer_ensure_running_remote_cmd,
+    set_portainer_stack_containers_state,
 )
 
 
@@ -164,6 +167,29 @@ def test_swap_fails_before_stopping_production_when_staging_containers_missing(t
         main(["--swap"], repo_root_override=tmp_path)
 
     assert not any("cd /srv/prod" in cmd and " stop;" in cmd for cmd in ssh_commands)
+
+
+def test_rewrite_staging_container_names_for_portainer_avoids_production_name_collisions():
+    stack_content = """
+services:
+  app:
+    x-deploy-role: app
+    container_name: protected-container
+    image: ghcr.io/example/app:latest
+  storage-manager:
+    container_name: storage-manager
+    image: ghcr.io/example/storage-manager:latest
+"""
+
+    rewritten = rewrite_staging_container_names_for_portainer(
+        stack_content=stack_content,
+        stack_name="staging-protected-container",
+    )
+
+    assert "container_name: staging-protected-container\n" in rewritten
+    assert "container_name: staging-protected-container-storage-manager\n" in rewritten
+    assert "container_name: protected-container\n" not in rewritten
+    assert "container_name: storage-manager\n" not in rewritten
 
 
 def test_resolve_network_host_from_ssh_target_uses_ssh_g(monkeypatch):
@@ -315,6 +341,102 @@ def test_is_portainer_access_token_valid_surfaces_portainer_message(monkeypatch)
         assert "Administrator initialization timeout" in str(exc)
     else:
         raise AssertionError("Expected SystemExit")
+
+
+def test_list_portainer_stack_containers_filters_by_compose_project_label(monkeypatch):
+    class DummyResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [
+                {
+                    "Id": "abc123",
+                    "Names": ["/staging-protected-container"],
+                    "Labels": {"com.docker.compose.project": "staging-protected-container"},
+                },
+                {
+                    "Id": "def456",
+                    "Names": ["/protected-container"],
+                    "Labels": {"com.docker.compose.project": "protected-container"},
+                },
+            ]
+
+    calls: list[str] = []
+
+    def fake_get(url, headers, **kwargs):
+        calls.append(url)
+        return DummyResponse()
+
+    monkeypatch.setattr("scripts.deploy.portainer_helpers.requests.get", fake_get)
+
+    containers = list_portainer_stack_containers(
+        host="192.168.1.45",
+        https_port=9943,
+        insecure=True,
+        endpoint_id="1",
+        access_token="token-123",
+        stack_name="staging-protected-container",
+    )
+
+    assert [container["Id"] for container in containers] == ["abc123"]
+    assert calls == ["https://192.168.1.45:9943/api/endpoints/1/docker/containers/json"]
+
+
+def test_set_portainer_stack_containers_state_posts_start_to_each_container(monkeypatch):
+    class ListResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [
+                {
+                    "Id": "abc123",
+                    "Names": ["/staging-protected-container"],
+                    "Labels": {"com.docker.compose.project": "staging-protected-container"},
+                },
+                {
+                    "Id": "def456",
+                    "Names": ["/staging-protected-container-storage-manager"],
+                    "Labels": {"com.docker.compose.project": "staging-protected-container"},
+                },
+            ]
+
+    class PostResponse:
+        status_code = 204
+        text = ""
+
+    posted_urls: list[str] = []
+
+    def fake_get(url, headers, **kwargs):
+        return ListResponse()
+
+    def fake_post(url, headers, **kwargs):
+        posted_urls.append(url)
+        return PostResponse()
+
+    monkeypatch.setattr("scripts.deploy.portainer_helpers.requests.get", fake_get)
+    monkeypatch.setattr("scripts.deploy.portainer_helpers.requests.post", fake_post)
+
+    names = set_portainer_stack_containers_state(
+        host="192.168.1.45",
+        https_port=9943,
+        insecure=True,
+        endpoint_id="1",
+        access_token="token-123",
+        stack_name="staging-protected-container",
+        action="start",
+    )
+
+    assert names == ["staging-protected-container", "staging-protected-container-storage-manager"]
+    assert posted_urls == [
+        "https://192.168.1.45:9943/api/endpoints/1/docker/containers/abc123/start",
+        "https://192.168.1.45:9943/api/endpoints/1/docker/containers/def456/start",
+    ]
 
 
 def test_read_deploy_secret_key_reads_token(tmp_path: Path):
