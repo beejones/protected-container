@@ -171,3 +171,54 @@ timestamp,git_ref,version,target,stack_name,domain,image,status
 5. Log swap event to CSV
 
 This is a **zero-downtime traffic swap** — no containers are restarted. Rollback = swap again.
+
+---
+
+## Follow-up: Volume Safety During Swap (Phase 6)
+
+### Problem
+
+After a swap, Caddy routes change but containers and their volumes do NOT move:
+- Production domain → staging containers (with **staging volumes**)
+- Staging domain → production containers (with **production volumes**)
+
+This creates two risks:
+1. **Data loss**: Production traffic writes to staging's volume. If staging volumes are smaller, ephemeral, or subject to aggressive cleanup, production data could be lost.
+2. **Storage-manager cleanup**: If storage-manager cleanup rules are running on the "now demoted" production containers (which still have production volumes), those cleanup algorithms could delete production data.
+
+### Design Constraints
+
+- Volumes are named by stack/compose project. Production stack has `protected-container_*` volumes; staging has `protected-container-staging_*` volumes.
+- Storage-manager labels declare cleanup policy per service. After swap, the labels stay with the container — they don't follow the traffic.
+- The swap is purely a Caddy routing change. Containers, mounts, and labels are unchanged.
+
+### Required Behavior
+
+1. **Before swap**: The swap script should verify that staging volumes contain a compatible data state (or are empty/disposable). This is the operator's responsibility, but the script should warn.
+2. **After swap**: The storage-manager cleanup on the newly-demoted stack (old production containers now receiving staging traffic) should be paused or its retention policy should be extended to avoid premature cleanup.
+3. **Volume promotion strategy**: If production data must persist after swap, the recommended approach is:
+   - Deploy to staging (new code, fresh volumes or copied data)
+   - Verify staging works
+   - Swap traffic (zero-downtime)
+   - The old production containers (now on staging domain) retain their volumes intact as a rollback safety net
+   - Only after confirming the swap is stable, optionally prune old volumes
+
+### Checkable Tasks
+
+- [ ] Add `--swap` pre-flight warning: "After swap, production traffic will use staging container volumes. Ensure staging data state is ready."
+- [ ] Add `--swap --confirm` flag to suppress the warning (for automation)
+- [ ] Document volume behavior in `docs/deploy/STAGING.md`: which volumes stay where after swap
+- [ ] Investigate storage-manager pause mechanism:
+  - Option A: Set a `storage-manager.pause=true` label on the demoted stack after swap
+  - Option B: Temporarily increase retention on demoted stack via API call
+  - Option C: Do nothing — cleanup only runs on labeled volumes and staging volumes are separate from production volumes (simplest if volume names are stack-scoped)
+- [ ] Decide whether to support volume migration (copy prod volumes → staging before swap) or document it as an operator responsibility
+- [ ] Add deploy message improvements: show target environment and version in "Prepared deployment plan" and "Done" messages
+
+### Resolution Note
+
+If production and staging stacks use **separate Docker volumes** (scoped by compose project name), then after a swap:
+- Production data stays in `protected-container_*` volumes attached to prod containers (now receiving staging traffic)
+- Staging data stays in `protected-container-staging_*` volumes attached to staging containers (now receiving production traffic)
+
+In this case, storage-manager cleanup is safe because it operates on the volume names it was configured for — not on the traffic the container happens to receive. **No special pause is needed if volumes are stack-scoped.** The key question is whether the staging container has enough data/state to serve production traffic.

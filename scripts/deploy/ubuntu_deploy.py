@@ -963,8 +963,10 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     resolved_storage_manager_api_url = hook_storage_api_url or resolved_storage_manager_api_url
     default_storage_registration_enabled = bool(hook_plan.extra_metadata.get("enable_default_storage_registration", True))
 
-    log_step("Prepared deployment plan", icon="🧭")
-    log_info(f"Target: {resolved_host}")
+    log_step(f"Prepared deployment plan [{deploy_target.upper()}]", icon="🧭")
+    log_info(f"Target environment: {deploy_target}")
+    log_info(f"Version: {deploy_log._read_app_version(repo_root)}")
+    log_info(f"Host: {resolved_host}")
     if resolved_portainer_host and resolved_portainer_host != portainer_helpers.extract_ssh_hostname(resolved_host):
         log_info(f"Portainer API host: {resolved_portainer_host}")
     log_info(f"Remote dir: {remote_dir}")
@@ -1273,7 +1275,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         status="success",
     )
 
-    print("[ubuntu-deploy] ✅ Done.")
+    print(f"[ubuntu-deploy] ✅ Done. Deployed to {deploy_target} (v{deploy_log._read_app_version(repo_root)}).")
 
 
 if __name__ == "__main__":
