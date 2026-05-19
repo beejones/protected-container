@@ -134,7 +134,7 @@ class TestAppendDeployRecord:
         assert rows[2][3] == "staging"
 
     def test_production_success_increments_version(self, tmp_repo: Path) -> None:
-        append_deploy_record(
+        csv_path = append_deploy_record(
             repo_root=tmp_repo,
             target="production",
             stack_name="prod-stack",
@@ -143,6 +143,8 @@ class TestAppendDeployRecord:
             status="success",
             git_ref="d" * 40,
         )
+        rows = list(csv.reader(csv_path.open()))
+        assert rows[1][2] == "1.2.4"
         # .env should now have APP_VERSION=1.2.4
         content = (tmp_repo / ".env").read_text()
         assert "APP_VERSION=1.2.4" in content

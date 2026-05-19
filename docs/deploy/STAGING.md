@@ -103,7 +103,7 @@ Every deploy writes a row to `out/deploy/deploy_log.csv`. The latest record appe
 | `image` | Container image deployed |
 | `status` | `success` / `failed` |
 
-`APP_VERSION` is recorded in the `version` column for every deploy. Successful production deploys increment `APP_VERSION` after the row is written. `swap` records increment the patch version when they promote a different git ref than the latest successful `production` or `swap` row; repeated swaps of the same git ref do not increment again. Staging records never increment `APP_VERSION`.
+`APP_VERSION` is recorded in the `version` column for every deploy. Successful production deploys write the incremented patch version into the CSV row and persist the same version back to `.env`. `swap` records increment the patch version when they promote a different git ref than the latest successful `production` or `swap` row; repeated swaps of the same git ref do not increment again. Staging records never increment `APP_VERSION`.
 
 **Rollback from CSV**: Find the latest `production` or `swap` + `success` row, use `git_ref` to checkout that commit, redeploy with `--prod`.
 

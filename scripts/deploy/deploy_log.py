@@ -144,6 +144,7 @@ def append_deploy_record(
             existing_rows = rows[1:] if rows[0] == CSV_COLUMNS else rows
 
     swap_incremented = False
+    production_incremented = False
     if version is None and _should_increment_swap_version(
         target=target,
         status=status,
@@ -154,6 +155,11 @@ def append_deploy_record(
         if new_version != resolved_version:
             resolved_version = new_version
             swap_incremented = True
+    elif version is None and target == "production" and status == "success":
+        new_version = _increment_patch(resolved_version)
+        if new_version != resolved_version:
+            resolved_version = new_version
+            production_incremented = True
 
     new_row = [
         timestamp,
@@ -172,11 +178,9 @@ def append_deploy_record(
         writer.writerow(new_row)
         writer.writerows(existing_rows)
 
-    # Auto-increment patch version after successful production deploy
-    if target == "production" and status == "success":
-        new_version = _increment_patch(resolved_version)
-        if new_version != resolved_version:
-            _write_app_version(repo_root, new_version)
+    # Persist any automatic release-version bump after the row is written.
+    if production_incremented:
+        _write_app_version(repo_root, resolved_version)
     elif swap_incremented:
         _write_app_version(repo_root, resolved_version)
 
