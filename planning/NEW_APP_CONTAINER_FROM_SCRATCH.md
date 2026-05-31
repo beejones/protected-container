@@ -143,8 +143,13 @@ autonomously with good defaults, later confirming the upstream image. Decisions:
 
 ### Phase 4 — Workflows
 - [x] Copy CI workflow; confirm `deploy.yml` is intentionally excluded.
-- [x] Create `.github/workflows/hermes.yml`: weekly schedule (cron) that pulls the latest
-      upstream hermes agent image(s) and pushes a base image to `ghcr.io/beejones`.
+- [x] Create `.github/workflows/hermes.yml` as the **weekly fetch CI**: a `schedule` (cron
+      `17 4 * * 1`) that fetches the latest upstream hermes agent image and copies it to
+      `ghcr.io/beejones/hermes-agent-base` (`:latest` + a dated tag). The same workflow is
+      **idempotent on manual runs**: it checks GHCR with `docker manifest inspect` and only
+      fetches+copies when the base image is missing (bootstrap/ensure-exists), unless
+      `force=true` is passed. This guarantees a first deploy can always pull the base, and the
+      weekly run keeps it current. Upstream source overridable via `HERMES_UPSTREAM_IMAGE`.
 
 ### Phase 5 — Validate
 - [x] `docker compose -f docker/docker-compose.ubuntu.yml config` renders cleanly.
