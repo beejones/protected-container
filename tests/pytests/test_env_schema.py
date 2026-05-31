@@ -53,6 +53,25 @@ def test_unknown_keys_fail(tmp_path: Path) -> None:
         validate_known_keys(RUNTIME_SCHEMA, kv, context="runtime")
 
 
+def test_storage_manager_keys_are_known_runtime_keys(tmp_path: Path) -> None:
+    # SM_* keys ship in env.example and are consumed by the storage-manager
+    # compose service; the runtime schema must accept them and apply defaults.
+    p = _write(
+        tmp_path / ".env",
+        "SM_CHECK_INTERVAL_SECONDS=300\nSM_LOG_LEVEL=INFO\n"
+        "SM_DB_PATH=/data/storage_manager.db\nSM_API_PORT=9100\n",
+    )
+    kv = parse_dotenv_file(p)
+    validate_known_keys(RUNTIME_SCHEMA, kv, context="runtime")
+
+    # Defaults applied when omitted.
+    kv2 = apply_defaults(RUNTIME_SCHEMA, {})
+    assert kv2[VarsEnum.SM_CHECK_INTERVAL_SECONDS.value] == "300"
+    assert kv2[VarsEnum.SM_LOG_LEVEL.value] == "INFO"
+    assert kv2[VarsEnum.SM_DB_PATH.value] == "/data/storage_manager.db"
+    assert kv2[VarsEnum.SM_API_PORT.value] == "9100"
+
+
 def test_alias_keys_fail(tmp_path: Path) -> None:
     p = _write(tmp_path / ".env.deploy", "IMAGE=ghcr.io/x/y:latest\n")
     kv = parse_dotenv_file(p)
