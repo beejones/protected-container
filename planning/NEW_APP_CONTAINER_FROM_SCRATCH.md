@@ -152,6 +152,14 @@ autonomously with good defaults, later confirming the upstream image. Decisions:
       weekly run keeps it current. Upstream source overridable via `HERMES_UPSTREAM_IMAGE`.
 
 ### Phase 5 — Validate
+- [~] **Run the `hermes.yml` CI to publish the base image to GHCR** (operator-run, in progress).
+      Trigger the workflow (`workflow_dispatch`, or wait for the weekly `schedule`) so it fetches
+      the upstream hermes agent image and copies it to
+      `ghcr.io/beejones/hermes-agent-base:latest` (+ dated tag). This is the **bootstrap step**
+      that makes the base image exist before the first deploy can build `APP_IMAGE` (the
+      Dockerfile is `FROM` the base). The user reports the workflow is already running. Verify
+      success afterwards with `docker manifest inspect ghcr.io/beejones/hermes-agent-base:latest`
+      (or by confirming the package appears under `ghcr.io/beejones`).
 - [x] `docker compose -f docker/docker-compose.ubuntu.yml config` renders cleanly.
 - [ ] `python scripts/deploy/_protected_container/scripts/deploy/validate_env.py` passes for
       the new repo env files. (Pending: requires `.env.secrets`/`.env.deploy.secrets` with
