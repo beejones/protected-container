@@ -124,6 +124,15 @@ autonomously with good defaults, later confirming the upstream image. Decisions:
 - [x] Add `storage-manager.<n>.*` cleanup labels for the app's volumes.
 - [x] Set env values (`PUBLIC_DOMAIN=hermes.zenia.eu`, `WEB_PORT`, `PORTAINER_STACK_NAME`,
       image refs) in the new repo `.env.deploy` working file.
+- [x] Create `docker/Dockerfile` so the deploy build/push step has a build target. The
+      `ubuntu_deploy.py` Step 2 ("Building and pushing APP_IMAGE locally") runs
+      `docker build -f docker/Dockerfile -t $APP_IMAGE docker/` and previously failed with
+      "Dockerfile not found". The Dockerfile is a thin layer `FROM` the weekly base image
+      (`BASE_IMAGE=ghcr.io/beejones/hermes-agent-base:latest`) built into a **distinct** app
+      tag (`APP_IMAGE=ghcr.io/beejones/hermes-agent:latest`) so the weekly base is never
+      clobbered. Aligned `.env.deploy` (APP_IMAGE/BASE_IMAGE/DOCKERFILE), compose default image,
+      README, and `AGENT_APP_SPECIFIC.md`. (Alternative: `--skip-build-push` / `UBUNTU_BUILD_PUSH=false`
+      to deploy the base image directly without a build.)
 
 ### Phase 3 — Deploy hooks & Caddy registration
 - [x] Implement `scripts/deploy/deploy_customizations.py` exporting `get_hooks()` with
