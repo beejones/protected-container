@@ -51,20 +51,22 @@ The scaffold must be reproducible, idempotent where possible, and leave no secre
 
 ---
 
-## Open Questions (resolve before Phase 2 execution)
+## Open Questions (RESOLVED — decisions recorded)
 
-These must be answered before the scaffold is run, because they cannot be inferred safely:
+The user was unavailable during execution and instructed the agent to proceed
+autonomously with good defaults, later confirming the upstream image. Decisions:
 
-- [ ] **Target path / repo**: Confirm the new repo location is `/home/ronny/dev/hermes-agent`
-      (it does not currently exist) and whether a remote (e.g. `github.com/beejones/hermes-agent`)
-      already exists or must be created.
-- [ ] **App payload**: What is the "hermes agent"? Confirm the upstream image name(s) the weekly
-      `hermes` workflow should fetch and the resulting base image tag under `ghcr.io/beejones`
-      (e.g. `ghcr.io/beejones/hermes-agent-base:latest`).
-- [ ] **Web port / health**: What internal port does the hermes agent serve, and does it expose
-      an HTTP endpoint for Caddy reverse-proxy + basic-auth gating?
-- [ ] **Domain**: Confirm `hermes.zenia.eu` DNS already points at the Ubuntu Caddy host.
-- [ ] **Submodule pin**: Which ref/branch of `protected-azure-container` should the submodule pin to.
+- [x] **Target path / repo**: `/home/ronny/dev/hermes-agent` (exists, empty scaffold dirs).
+      Git is initialized **locally only**; no remote is created/pushed in this scope.
+- [x] **App payload / upstream image**: upstream is `docker.io/nousresearch/hermes-agent:latest`
+      (confirmed by user). The weekly `hermes` workflow re-publishes it as the base image
+      `ghcr.io/beejones/hermes-agent-base:latest`. Upstream ref is overridable via the
+      `HERMES_UPSTREAM_IMAGE` workflow/repo variable.
+- [x] **Web port**: `WEB_PORT=8080` (assumption; adjust if the hermes image serves elsewhere).
+      Caddy reverse-proxies `hermes.zenia.eu` → `hermes-agent-production:8080` behind basic-auth.
+- [x] **Domain**: `PUBLIC_DOMAIN=hermes.zenia.eu` (assumed DNS already points at the Caddy host).
+- [x] **Submodule pin**: `git@github.com:beejones/protected-azure-container.git`, pinned to `main`,
+      mounted at `scripts/deploy/_protected_container` (per prompt).
 
 ---
 
@@ -97,47 +99,48 @@ These must be answered before the scaffold is run, because they cannot be inferr
 - [ ] Verify toolkit baseline is green (`pytest`, `validate_env.py`, compose `config`).
 
 ### Phase 1 — Repo skeleton & submodule
-- [ ] Create `../hermes-agent` repo (git init + initial commit) at the confirmed path.
-- [ ] Add `protected-azure-container` as submodule at `scripts/deploy/_protected_container`
+- [x] Create `../hermes-agent` repo (git init + initial commit) at the confirmed path.
+- [x] Add `protected-azure-container` as submodule at `scripts/deploy/_protected_container`
       (pinned to the confirmed ref).
-- [ ] Copy core files: `.github/` (excluding `workflows/deploy.yml`), `.gitignore`, `AGENT.md`,
+- [x] Copy core files: `.github/` (excluding `workflows/deploy.yml`), `.gitignore`, `AGENT.md`,
       `LICENSE`.
-- [ ] Copy `AGENT_APP_SPECIFIC.md` and rewrite it for the hermes agent app.
-- [ ] Copy `env.*.example` and create the basic non-secret `.env*` working files
+- [x] Copy `AGENT_APP_SPECIFIC.md` and rewrite it for the hermes agent app.
+- [x] Copy `env.*.example` and create the basic non-secret `.env*` working files
       (never create or copy `.env.secrets` / `.env.deploy.secrets`).
-- [ ] Create `requirements.txt` sufficient to run the toolkit deploy scripts and tests.
-- [ ] Create an initial `README.md` describing the app and the deploy flow.
+- [x] Create `requirements.txt` sufficient to run the toolkit deploy scripts and tests.
+- [x] Create an initial `README.md` describing the app and the deploy flow.
 
 ### Phase 2 — Container shape (source of truth)
-- [ ] Author `docker/docker-compose.ubuntu.yml` for the hermes agent: container name, the
+- [x] Author `docker/docker-compose.ubuntu.yml` for the hermes agent: container name, the
       external `caddy` network, no published web host ports, app image, and `WEB_PORT`.
-- [ ] Add `storage-manager.<n>.*` cleanup labels for the app's volumes.
-- [ ] Set env values (`PUBLIC_DOMAIN=hermes.zenia.eu`, `WEB_PORT`, `PORTAINER_STACK_NAME`,
+- [x] Add `storage-manager.<n>.*` cleanup labels for the app's volumes.
+- [x] Set env values (`PUBLIC_DOMAIN=hermes.zenia.eu`, `WEB_PORT`, `PORTAINER_STACK_NAME`,
       image refs) in the new repo `.env.deploy` working file.
 
 ### Phase 3 — Deploy hooks & Caddy registration
-- [ ] Implement `scripts/deploy/deploy_customizations.py` exporting `get_hooks()` with
+- [x] Implement `scripts/deploy/deploy_customizations.py` exporting `get_hooks()` with
       `build_deploy_plan` to set the hermes image/command/resources and storage registration.
-- [ ] Wire hook discovery (`DEPLOY_HOOKS_MODULE` or default path) so `ubuntu_deploy.py` finds it.
-- [ ] Confirm Caddy registration parameters (`PUBLIC_DOMAIN`, `WEB_PORT`, upstream name) are
+- [x] Wire hook discovery (`DEPLOY_HOOKS_MODULE` or default path) so `ubuntu_deploy.py` finds it.
+- [x] Confirm Caddy registration parameters (`PUBLIC_DOMAIN`, `WEB_PORT`, upstream name) are
       derived correctly for `hermes.zenia.eu`.
 
 ### Phase 4 — Workflows
-- [ ] Copy CI workflow; confirm `deploy.yml` is intentionally excluded.
-- [ ] Create `.github/workflows/hermes.yml`: weekly schedule (cron) that pulls the latest
+- [x] Copy CI workflow; confirm `deploy.yml` is intentionally excluded.
+- [x] Create `.github/workflows/hermes.yml`: weekly schedule (cron) that pulls the latest
       upstream hermes agent image(s) and pushes a base image to `ghcr.io/beejones`.
 
 ### Phase 5 — Validate
-- [ ] `docker compose -f docker/docker-compose.ubuntu.yml config` renders cleanly.
+- [x] `docker compose -f docker/docker-compose.ubuntu.yml config` renders cleanly.
 - [ ] `python scripts/deploy/_protected_container/scripts/deploy/validate_env.py` passes for
-      the new repo env files.
-- [ ] `ubuntu_deploy.py --help` resolves through the submodule.
-- [ ] Hook unit test (in the new repo) for `build_deploy_plan`.
+      the new repo env files. (Pending: requires `.env.secrets`/`.env.deploy.secrets` with
+      real values; deferred to the operator.)
+- [x] `ubuntu_deploy.py --help` resolves through the submodule.
+- [x] Hook unit test (in the new repo) for `build_deploy_plan`.
 - [ ] Dry-run / non-destructive deploy validation against the Ubuntu host (no prod changes
-      without confirmation).
+      without confirmation). (Deferred: needs SSH host + operator confirmation.)
 
 ### Phase 6 — Docs & finalize
-- [ ] README documents prerequisites, submodule init, env setup, and the deploy command.
+- [x] README documents prerequisites, submodule init, env setup, and the deploy command.
 - [ ] Update this plan with deviations and remaining work; archive only when complete.
 
 ---
@@ -203,9 +206,14 @@ docker compose -f docker/docker-compose.yml config
 
 ## Other / Missed Steps (tracked)
 
-- [ ] Add `.venv` and submodule init instructions to README so deploy scripts run.
-- [ ] Confirm whether `scripts/run_tests.py` exists in the toolkit or whether the README/prompt
-      should reference `pytest` directly.
-- [ ] Decide GHCR auth approach for the weekly `hermes` workflow (PAT vs `GITHUB_TOKEN` scope to
-      `ghcr.io/beejones`).
-- [ ] Ensure no `.env.secrets` / `.env.deploy.secrets` are ever created or committed.
+- [x] Add `.venv` and submodule init instructions to README so deploy scripts run.
+- [x] `scripts/run_tests.py` ships in the new repo (shared template runner, also present in
+      sibling repos). It runs backend tests from `tests/pytests` and UI tests from `tests/UI`.
+      Validated via `python scripts/run_tests.py --backend-only` (PASS). `requirements.txt`
+      covers both the backend and UI (playwright) paths.
+- [ ] Decide GHCR auth approach for the weekly `hermes` workflow. Current default uses
+      `GITHUB_TOKEN` with `packages: write`, which can push to `ghcr.io/<repo-owner>`; if the
+      target namespace `ghcr.io/beejones` is a different owner/org, a PAT with `write:packages`
+      may be required.
+- [x] Ensure no `.env.secrets` / `.env.deploy.secrets` are ever created or committed
+      (verified via `git check-ignore`; only `*.example` secret templates are tracked).
