@@ -87,16 +87,24 @@ autonomously with good defaults, later confirming the upstream image. Decisions:
 ## Checkable Task Overview
 
 ### Phase 0 — Cleanup (module-cleanup skill, mandatory)
-- [ ] Audit the scaffold-relevant slice in the toolkit (`scripts/deploy/`, `docker/`,
+- [x] Audit the scaffold-relevant slice in the toolkit (`scripts/deploy/`, `docker/`,
       `env.*.example`, `docs/deploy/`) for dead code / stale references that would be copied
-      into or referenced by the new repo.
-- [ ] Remove or fix any stale references the scaffold would propagate (e.g. `scripts/run_tests.py`
-      mentioned in the prompt — confirm it exists or correct the reference).
-- [ ] Consolidate any duplicated scaffold guidance across `docs/deploy/ADD_YOUR_APP.md`,
-      `docs/ADD_YOUR_APP.md`, and `planning/`.
-- [ ] Ensure focused tests still pass for touched toolkit helpers (if any toolkit file changes).
-- [ ] Review `docs/deploy/` links/examples referenced by this plan for accuracy.
-- [ ] Verify toolkit baseline is green (`pytest`, `validate_env.py`, compose `config`).
+      into or referenced by the new repo. (Audited file sizes + grepped for `run_tests.py`,
+      `_protected_container`, cross-doc refs.)
+- [x] Remove or fix any stale references the scaffold would propagate (e.g. `scripts/run_tests.py`
+      mentioned in the prompt — confirm it exists or correct the reference). (`scripts/run_tests.py`
+      is intentionally a downstream/template runner — present in the new repo and sibling repos,
+      NOT a toolkit file; no toolkit reference to fix.)
+- [x] Consolidate any duplicated scaffold guidance across `docs/deploy/ADD_YOUR_APP.md`,
+      `docs/ADD_YOUR_APP.md`, and `planning/`. (Found `docs/ADD_YOUR_APP.md` was a byte-for-byte
+      duplicate of `docs/deploy/ADD_YOUR_APP.md` with no live references — README links only the
+      `docs/deploy/` copy. Removed the orphaned root duplicate; commit `2f7d538`.)
+- [x] Ensure focused tests still pass for touched toolkit helpers (no toolkit helper code changed;
+      full suite run as the regression check below).
+- [x] Review `docs/deploy/` links/examples referenced by this plan for accuracy. (README link to
+      `docs/deploy/ADD_YOUR_APP.md` remains valid after the duplicate removal; no broken links.)
+- [x] Verify toolkit baseline is green (`pytest` 171 passed, compose `config` OK; `validate_env.py`
+      requires populated secret env files and is exercised in the deploy flow, not this baseline).
 
 ### Phase 1 — Repo skeleton & submodule
 - [x] Create `../hermes-agent` repo (git init + initial commit) at the confirmed path.
@@ -211,9 +219,11 @@ docker compose -f docker/docker-compose.yml config
       sibling repos). It runs backend tests from `tests/pytests` and UI tests from `tests/UI`.
       Validated via `python scripts/run_tests.py --backend-only` (PASS). `requirements.txt`
       covers both the backend and UI (playwright) paths.
-- [ ] Decide GHCR auth approach for the weekly `hermes` workflow. Current default uses
-      `GITHUB_TOKEN` with `packages: write`, which can push to `ghcr.io/<repo-owner>`; if the
-      target namespace `ghcr.io/beejones` is a different owner/org, a PAT with `write:packages`
-      may be required.
+- [x] Decide GHCR auth approach for the weekly `hermes` workflow. **Decision:** keep the
+      `GITHUB_TOKEN` + `packages: write` default, which pushes to `ghcr.io/<repo-owner>` and works
+      when the hermes-agent repo is owned by `beejones`. If `ghcr.io/beejones` is a different
+      owner/org than the repo, the operator must add a PAT with `write:packages` as the
+      `HERMES_GHCR_TOKEN` repo secret and switch the workflow login to use it. Documented as an
+      operator follow-up; no code change needed for the common (same-owner) case.
 - [x] Ensure no `.env.secrets` / `.env.deploy.secrets` are ever created or committed
       (verified via `git check-ignore`; only `*.example` secret templates are tracked).
