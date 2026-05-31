@@ -44,7 +44,9 @@ Each key has an `EnvKeySpec`:
 
 There are two schemas:
 
-- `RUNTIME_SCHEMA`: keys permitted in `.env`
+- `RUNTIME_SCHEMA`: keys permitted in `.env` (e.g. `BASIC_AUTH_USER`, `APP_VERSION`, and the
+  storage-manager sidecar knobs `SM_CHECK_INTERVAL_SECONDS`, `SM_LOG_LEVEL`, `SM_DB_PATH`,
+  `SM_API_PORT`, which the `docker/storage-manager` compose service consumes via `${SM_*:-default}`)
 - `DEPLOY_SCHEMA`: keys permitted in `.env.deploy`
 
 ## Add a new deploy-time variable (example)

@@ -86,6 +86,13 @@ class VarsEnum(str, Enum):
     BASIC_AUTH_USER = "BASIC_AUTH_USER"
     APP_VERSION = "APP_VERSION"
 
+    # Storage-manager sidecar (consumed by docker/storage-manager compose via
+    # ${SM_*:-default}; shipped in env.example, so the runtime schema must know them)
+    SM_CHECK_INTERVAL_SECONDS = "SM_CHECK_INTERVAL_SECONDS"
+    SM_LOG_LEVEL = "SM_LOG_LEVEL"
+    SM_DB_PATH = "SM_DB_PATH"
+    SM_API_PORT = "SM_API_PORT"
+
 
 class SecretsEnum(str, Enum):
     # Image / registry
@@ -162,6 +169,30 @@ RUNTIME_SCHEMA: tuple[EnvKeySpec, ...] = (
         key=VarsEnum.APP_VERSION,
         mandatory=False,
         default="0.0.0",
+        targets=frozenset({EnvTarget.DOTENV_RUNTIME}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.SM_CHECK_INTERVAL_SECONDS,
+        mandatory=False,
+        default="300",
+        targets=frozenset({EnvTarget.DOTENV_RUNTIME}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.SM_LOG_LEVEL,
+        mandatory=False,
+        default="INFO",
+        targets=frozenset({EnvTarget.DOTENV_RUNTIME}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.SM_DB_PATH,
+        mandatory=False,
+        default="/data/storage_manager.db",
+        targets=frozenset({EnvTarget.DOTENV_RUNTIME}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.SM_API_PORT,
+        mandatory=False,
+        default="9100",
         targets=frozenset({EnvTarget.DOTENV_RUNTIME}),
     ),
 )
