@@ -22,6 +22,27 @@
 - **Cleanup**: Delete obsolete code and stale documentation immediately.
 - **Permissions**: You have permission to run validation commands and tests without asking.
 
+### Skill Routing
+- **Before non-trivial work**: Check whether a skill applies. If unsure, read `.github/skills/using-agent-skills/SKILL.md` first.
+- **Context setup**: Use `.github/skills/context-engineering/SKILL.md` when starting a session, switching deploy surfaces, or packing relevant files/tests/docs/examples before work.
+- **Planning**: Use `.github/skills/plan/SKILL.md` for `/plan`, planning files, task breakdown, dependency ordering, and validation planning.
+- **Deploy readiness**: Use `.github/skills/deploy-readiness-check/SKILL.md` before deploy commands, after compose/env-schema changes, or when diagnosing preflight failures.
+- **Deploy rollout/adoption**: Use `.github/skills/deploy-rollout-adoption/SKILL.md` when rolling out validated deployment-contract changes across code, docs, env examples, workflows, and template surfaces.
+- **Feature prep and cleanup**: Use `.github/skills/module-cleanup/SKILL.md` for Phase 0 cleanup, large-module refactors, dead code removal, and duplicate consolidation.
+- **Python typing**: Use `.github/skills/typed-code-generation/SKILL.md` before writing or modifying Python production or test code.
+- **Bug fixes**: Use `.github/skills/bug-fix/SKILL.md` for regressions, uncaught exceptions, wrong behavior, or failing tests caused by production code.
+- **Testing and validation**: Use `.github/skills/test/SKILL.md` for `/test`, focused validation plans, pytest, compose config checks, deploy command help checks, and CI evidence.
+- **Simplification**: Use `.github/skills/code-simplify/SKILL.md` for behavior-preserving readability/refactor passes.
+- **Code review**: Use `.github/skills/review/SKILL.md` before merge or when reviewing agent/human changes.
+- **API/interface design**: Use `.github/skills/api-interface-design/SKILL.md` for deploy hook contracts, env schema contracts, CLI args, compose labels, and service/API boundaries.
+- **Frontend UI**: Use `.github/skills/frontend-ui-engineering/SKILL.md` for code-server, Portainer, docs-visible UI, or browser-facing deployment flows.
+- **Browser runtime checks**: Use `.github/skills/browser-testing-with-devtools/SKILL.md` for real-browser DOM, console, network, screenshot, accessibility, and performance verification.
+- **Security**: Use `.github/skills/security-hardening/SKILL.md` for secrets, env files, auth, Key Vault, GitHub Actions secrets, CORS, external inputs, or deploy-sensitive paths.
+- **Performance**: Use `.github/skills/performance-optimization/SKILL.md` for measure-first deploy, build, validation, Docker, API, or browser performance work.
+- **Docs/ADRs**: Use `.github/skills/documentation-and-adrs/SKILL.md` for docs maintenance, architecture rationale, public deploy contracts, and agent guidance updates.
+- **Source-driven implementation**: Use `.github/skills/source-driven-development/SKILL.md` when framework/library/tool behavior must be verified against official docs.
+- **PR and merge work**: Use `.github/skills/merge/SKILL.md` for PR reports, reviewer feedback, CI watching, mergeability checks, merging, and cleanup.
+
 ## 3. Project Context
 
 ### Project Overview

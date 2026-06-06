@@ -125,6 +125,10 @@ Internet → Caddy (443) → [Basic Auth] → code-server (8080)
 - [Shared Caddy Routing](docs/deploy/SHARED_CADDY_ROUTING.md) - Register other containers with the centralized Caddy proxy
 - [Storage Manager](docs/deploy/STORAGE_MANAGER.md) - Automated volume cleanup for app containers
 
+## Agent Workflow Skills
+
+This repository includes repo-specific AI coding workflow skills under `.github/skills/` and agent guidance in `AGENT.md`. These files are original, deployment-focused adaptations inspired by [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills), created by [Addy Osmani](https://github.com/addyosmani). The upstream project is used as workflow inspiration; the local skills here are tailored to this deployment toolkit's contracts, validation commands, and security boundaries.
+
 ## Use This Repo As A Template
 
 If you want to use this project as a base for a new repo that needs a protected Azure container:
