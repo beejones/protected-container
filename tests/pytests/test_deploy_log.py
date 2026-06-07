@@ -9,10 +9,13 @@ import pytest
 
 from scripts.deploy.deploy_log import (
     CSV_COLUMNS,
+    LEGACY_CSV_COLUMNS,
+    DeployLogSettings,
     _increment_patch,
     _read_app_version,
     _write_app_version,
     append_deploy_record,
+    append_deploy_record_with_settings,
     get_csv_path,
 )
 
@@ -89,17 +92,19 @@ class TestAppendDeployRecord:
             image="ghcr.io/user/app:latest",
             status="success",
             git_ref="a" * 40,
+            local_branch="feature/deploy-log-branch",
             version="1.2.3",
         )
         assert csv_path.exists()
         rows = list(csv.reader(csv_path.open()))
         assert rows[0] == CSV_COLUMNS
         assert len(rows) == 2
-        assert rows[1][3] == "staging"
-        assert rows[1][4] == "my-stack"
-        assert rows[1][5] == "staging.example.com"
-        assert rows[1][6] == "ghcr.io/user/app:latest"
-        assert rows[1][7] == "success"
+        assert rows[1][2] == "feature/deploy-log-branch"
+        assert rows[1][4] == "staging"
+        assert rows[1][5] == "my-stack"
+        assert rows[1][6] == "staging.example.com"
+        assert rows[1][7] == "ghcr.io/user/app:latest"
+        assert rows[1][8] == "success"
 
     def test_writes_newest_record_below_header(self, tmp_repo: Path) -> None:
         append_deploy_record(
@@ -110,6 +115,7 @@ class TestAppendDeployRecord:
             image="img1",
             status="success",
             git_ref="b" * 40,
+            local_branch="main",
             version="1.0.0",
         )
         append_deploy_record(
@@ -120,6 +126,7 @@ class TestAppendDeployRecord:
             image="img2",
             status="failed",
             git_ref="c" * 40,
+            local_branch="release/deploy",
             version="1.0.1",
         )
         csv_path = get_csv_path(tmp_repo)
@@ -127,11 +134,41 @@ class TestAppendDeployRecord:
         # Header + 2 data rows
         assert len(rows) == 3
         assert rows[1][1] == "c" * 40
-        assert rows[1][2] == "1.0.1"
-        assert rows[1][3] == "production"
+        assert rows[1][2] == "release/deploy"
+        assert rows[1][3] == "1.0.1"
+        assert rows[1][4] == "production"
         assert rows[2][1] == "b" * 40
-        assert rows[2][2] == "1.0.0"
-        assert rows[2][3] == "staging"
+        assert rows[2][2] == "main"
+        assert rows[2][3] == "1.0.0"
+        assert rows[2][4] == "staging"
+
+    def test_legacy_rows_are_prefilled_with_main(self, tmp_repo: Path) -> None:
+        csv_path = tmp_repo / "out" / "deploy" / "deploy_log.csv"
+        csv_path.parent.mkdir(parents=True)
+        with csv_path.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(LEGACY_CSV_COLUMNS)
+            writer.writerow(["2026-05-18T00:00:00Z", "0" * 40, "1.2.3", "swap", "prod-stack", "prod.example.com", "img", "success"])
+
+        csv_path = append_deploy_record(
+            repo_root=tmp_repo,
+            target="staging",
+            stack_name="stg-stack",
+            domain="stg.example.com",
+            image="img",
+            status="success",
+            git_ref="1" * 40,
+            local_branch="feature/deploy-log-branch",
+            version="1.2.4",
+        )
+
+        rows = list(csv.reader(csv_path.open()))
+        assert rows[0] == CSV_COLUMNS
+        assert rows[1][2] == "feature/deploy-log-branch"
+        assert rows[2][1] == "0" * 40
+        assert rows[2][2] == "main"
+        assert rows[2][3] == "1.2.3"
+        assert rows[2][4] == "swap"
 
     def test_production_success_increments_version(self, tmp_repo: Path) -> None:
         csv_path = append_deploy_record(
@@ -142,9 +179,10 @@ class TestAppendDeployRecord:
             image="img",
             status="success",
             git_ref="d" * 40,
+            local_branch="main",
         )
         rows = list(csv.reader(csv_path.open()))
-        assert rows[1][2] == "1.2.4"
+        assert rows[1][3] == "1.2.4"
         # .env should now have APP_VERSION=1.2.4
         content = (tmp_repo / ".env").read_text()
         assert "APP_VERSION=1.2.4" in content
@@ -158,6 +196,7 @@ class TestAppendDeployRecord:
             image="img",
             status="success",
             git_ref="e" * 40,
+            local_branch="main",
         )
         content = (tmp_repo / ".env").read_text()
         assert "APP_VERSION=1.2.3" in content
@@ -168,7 +207,7 @@ class TestAppendDeployRecord:
         with csv_path.open("w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(CSV_COLUMNS)
-            writer.writerow(["2026-05-18T00:00:00Z", "0" * 40, "1.2.3", "swap", "prod-stack", "prod.example.com", "img", "success"])
+            writer.writerow(["2026-05-18T00:00:00Z", "0" * 40, "main", "1.2.3", "swap", "prod-stack", "prod.example.com", "img", "success"])
 
         csv_path = append_deploy_record(
             repo_root=tmp_repo,
@@ -178,11 +217,12 @@ class TestAppendDeployRecord:
             image="img",
             status="success",
             git_ref="1" * 40,
+            local_branch="release/deploy",
         )
 
         rows = list(csv.reader(csv_path.open()))
-        assert rows[1][2] == "1.2.4"
-        assert rows[1][3] == "swap"
+        assert rows[1][3] == "1.2.4"
+        assert rows[1][4] == "swap"
         content = (tmp_repo / ".env").read_text()
         assert "APP_VERSION=1.2.4" in content
 
@@ -193,7 +233,7 @@ class TestAppendDeployRecord:
         with csv_path.open("w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(CSV_COLUMNS)
-            writer.writerow(["2026-05-18T00:00:00Z", "1" * 40, "1.2.4", "swap", "prod-stack", "prod.example.com", "img", "success"])
+            writer.writerow(["2026-05-18T00:00:00Z", "1" * 40, "main", "1.2.4", "swap", "prod-stack", "prod.example.com", "img", "success"])
 
         csv_path = append_deploy_record(
             repo_root=tmp_repo,
@@ -203,11 +243,12 @@ class TestAppendDeployRecord:
             image="img",
             status="success",
             git_ref="1" * 40,
+            local_branch="release/deploy",
         )
 
         rows = list(csv.reader(csv_path.open()))
-        assert rows[1][2] == "1.2.4"
-        assert rows[1][3] == "swap"
+        assert rows[1][3] == "1.2.4"
+        assert rows[1][4] == "swap"
         content = (tmp_repo / ".env").read_text()
         assert "APP_VERSION=1.2.4" in content
 
@@ -220,6 +261,7 @@ class TestAppendDeployRecord:
             image="img",
             status="failed",
             git_ref="f" * 40,
+            local_branch="main",
         )
         content = (tmp_repo / ".env").read_text()
         assert "APP_VERSION=1.2.3" in content
@@ -233,13 +275,82 @@ class TestAppendDeployRecord:
             image="",
             status="success",
             git_ref="0" * 40,
+            local_branch="release/deploy",
             version="2.0.0",
         )
         rows = list(csv.reader(csv_path.open()))
         data = rows[1]
-        # timestamp, git_ref, version, target, stack_name, domain, image, status
-        assert len(data) == 8
+        # timestamp, git_ref, local_branch, version, target, stack_name, domain, image, status
+        assert len(data) == 9
         assert data[1] == "0" * 40
-        assert data[2] == "2.0.0"
-        assert data[3] == "swap"
-        assert data[6] == ""
+        assert data[2] == "release/deploy"
+        assert data[3] == "2.0.0"
+        assert data[4] == "swap"
+        assert data[7] == ""
+
+    def test_custom_csv_path_writes_to_requested_path(self, tmp_repo: Path) -> None:
+        settings = DeployLogSettings(csv_path=Path("out/custom/deploy_log.csv"))
+
+        csv_path = append_deploy_record_with_settings(
+            repo_root=tmp_repo,
+            settings=settings,
+            target="staging",
+            stack_name="stg-stack",
+            domain="stg.example.com",
+            image="img",
+            status="success",
+            git_ref="1" * 40,
+            local_branch="feature/deploy-log-hook",
+            version="1.2.3",
+        )
+
+        assert csv_path == tmp_repo / "out" / "custom" / "deploy_log.csv"
+        assert csv_path.exists()
+        assert not get_csv_path(tmp_repo).exists()
+
+    def test_disabled_versioning_keeps_current_production_version(self, tmp_repo: Path) -> None:
+        settings = DeployLogSettings(csv_path=get_csv_path(tmp_repo), versioning_enabled=False)
+
+        csv_path = append_deploy_record_with_settings(
+            repo_root=tmp_repo,
+            settings=settings,
+            target="production",
+            stack_name="prod-stack",
+            domain="prod.example.com",
+            image="img",
+            status="success",
+            git_ref="2" * 40,
+            local_branch="release/deploy",
+        )
+
+        rows = list(csv.reader(csv_path.open()))
+        assert rows[1][3] == "1.2.3"
+        content = (tmp_repo / ".env").read_text()
+        assert "APP_VERSION=1.2.3" in content
+
+    def test_disabled_versioning_keeps_current_swap_version(self, tmp_repo: Path) -> None:
+        csv_path = tmp_repo / "out" / "deploy" / "deploy_log.csv"
+        csv_path.parent.mkdir(parents=True)
+        with csv_path.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(CSV_COLUMNS)
+            writer.writerow(["2026-05-18T00:00:00Z", "0" * 40, "main", "1.2.3", "swap", "prod-stack", "prod.example.com", "img", "success"])
+
+        settings = DeployLogSettings(csv_path=get_csv_path(tmp_repo), versioning_enabled=False)
+
+        csv_path = append_deploy_record_with_settings(
+            repo_root=tmp_repo,
+            settings=settings,
+            target="swap",
+            stack_name="prod-stack",
+            domain="prod.example.com",
+            image="img",
+            status="success",
+            git_ref="3" * 40,
+            local_branch="release/deploy",
+        )
+
+        rows = list(csv.reader(csv_path.open()))
+        assert rows[1][3] == "1.2.3"
+        content = (tmp_repo / ".env").read_text()
+        assert "APP_VERSION=1.2.3" in content

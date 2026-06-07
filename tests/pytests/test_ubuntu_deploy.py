@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.deploy import deploy_log
 from scripts.deploy.ubuntu_deploy import (
     _coerce_label_value,
     _should_fallback_to_remote_compose,
@@ -169,7 +170,11 @@ def test_swap_promotes_to_production_stack_and_stops_only_staging(tmp_path, monk
         monkeypatch.delenv(key, raising=False)
 
     class DummyHooks:
-        def call(self, *args, **kwargs):
+        def call(self, hook_name, *args, **kwargs):
+            if hook_name == "configure_deploy_log":
+                settings = args[2]
+                settings.versioning_enabled = False
+                settings.csv_path = Path("out/custom/deploy_log.csv")
             return None
 
     class DummyResult:
@@ -209,10 +214,26 @@ def test_swap_promotes_to_production_stack_and_stops_only_staging(tmp_path, monk
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.set_portainer_stack_containers_state", fake_set_portainer_stack_containers_state)
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.ensure_caddy_registration", lambda **kwargs: None)
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.is_domain_registered", lambda **kwargs: True)
-    deploy_records: list[dict[str, str]] = []
+    deploy_record_targets: list[str] = []
+    deploy_record_settings: list[deploy_log.DeployLogSettings] = []
+
+    def fake_append_deploy_record_with_settings(
+        *,
+        repo_root: Path,
+        settings: deploy_log.DeployLogSettings,
+        target: str,
+        stack_name: str,
+        domain: str,
+        image: str,
+        status: str,
+    ) -> Path:
+        deploy_record_targets.append(target)
+        deploy_record_settings.append(settings)
+        return repo_root / "deploy_log.csv"
+
     monkeypatch.setattr(
-        "scripts.deploy.ubuntu_deploy.deploy_log.append_deploy_record",
-        lambda **kwargs: deploy_records.append(kwargs) or tmp_path / "deploy_log.csv",
+        "scripts.deploy.ubuntu_deploy.deploy_log.append_deploy_record_with_settings",
+        fake_append_deploy_record_with_settings,
     )
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log._read_app_version", lambda repo_root: "1.2.3")
 
@@ -220,7 +241,9 @@ def test_swap_promotes_to_production_stack_and_stops_only_staging(tmp_path, monk
 
     assert deployed_stack_names == ["protected-container"]
     assert state_calls == [("staging-protected-container", "stop")]
-    assert deploy_records[0]["target"] == "swap"
+    assert deploy_record_targets == ["swap"]
+    assert deploy_record_settings[0].versioning_enabled is False
+    assert deploy_record_settings[0].csv_path == Path("out/custom/deploy_log.csv")
 
 
 def test_rewrite_staging_container_names_for_portainer_avoids_production_name_collisions():

@@ -96,6 +96,7 @@ Every deploy writes a row to `out/deploy/deploy_log.csv`. The latest record appe
 |--------|---------|
 | `timestamp` | `2026-05-18T14:30:00Z` |
 | `git_ref` | Full 40-char SHA |
+| `local_branch` | Checked-out deploy branch |
 | `version` | `1.2.3` from `APP_VERSION` |
 | `target` | `staging` / `production` / `swap` |
 | `stack_name` | Portainer stack name |

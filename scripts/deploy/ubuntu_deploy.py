@@ -1394,8 +1394,15 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     )
 
     # --- Deploy tracking CSV ------------------------------------------------
-    deploy_log.append_deploy_record(
+    deploy_log_settings = deploy_log.default_deploy_log_settings(repo_root)
+    hooks.call("configure_deploy_log", hook_ctx, hook_plan, deploy_log_settings)
+
+    if not deploy_log_settings.versioning_enabled:
+        log_info("Deploy log versioning disabled by deploy hook.", icon="🪝")
+
+    deploy_log.append_deploy_record_with_settings(
         repo_root=repo_root,
+        settings=deploy_log_settings,
         target="swap" if swap_requested else deploy_target,
         stack_name=resolved_portainer_stack_name,
         domain=resolved_public_domain,
