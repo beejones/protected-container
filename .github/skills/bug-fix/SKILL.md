@@ -93,35 +93,14 @@ Test: tests/pytests/test_<module>.py::<test_name>
 | Skipping the "must fail" gate | Without proof of failure, the test may not actually cover the bug. |
 | Large refactors in the fix commit | Mix of concerns; keep the fix minimal and isolated. |
 
-## Deploy / Compose Variant
+## UI Bug Variant
 
-For bugs in deploy scripts, compose files, env-schema handling, or proxy configuration:
+For bugs in templates, JS, or CSS:
 
-1. Follow the same hypothesis → failing test → minimal fix → verify flow.
-2. Prefer a focused pytest under `tests/pytests/` for the owning module.
-3. Add the smallest executable check that proves the changed surface works:
-    - Shell scripts:
-       ```bash
-       bash -n scripts/deploy/<script>.sh
-       ```
-    - Deploy CLI parsing:
-       ```bash
-       source .venv/bin/activate && python scripts/deploy/<tool>.py --help
-       ```
-    - Env/schema changes:
-       ```bash
-       source .venv/bin/activate && python3 scripts/deploy/validate_env.py
-       ```
-    - Compose contract changes:
-       ```bash
-       docker compose -f <compose-file> config
-       ```
-4. If runtime or ingress behavior changed, run a local Docker smoke check when feasible.
-
-## Documentation Bug Variant
-
-For bugs in docs, examples, or planning files:
-
-1. Still state a falsifiable hypothesis about the incorrect behavior or contract.
-2. Fix the doc alongside the owning code or example when the bug is a contract mismatch.
-3. Verify commands, file paths, env keys, and referenced workflows against the current repo state.
+1. Follow the same hypothesis → test → fix → verify flow.
+2. Write the test in `tests/UI/test_ui_<module>.py` using Playwright.
+3. Start the dev server before running UI tests:
+   ```bash
+   source .venv/bin/activate && STOCK_DASHBOARD_TEST_MODE=true python run.py
+   ```
+4. Also visually verify the fix in a browser.

@@ -86,7 +86,7 @@ autonomously with good defaults, later confirming the upstream image. Decisions:
 
 ## Checkable Task Overview
 
-### Phase 0 — Cleanup (module-cleanup skill, mandatory)
+### Phase 0 — Cleanup (code-cleanup skill, mandatory)
 - [x] Audit the scaffold-relevant slice in the toolkit (`scripts/deploy/`, `docker/`,
       `env.*.example`, `docs/deploy/`) for dead code / stale references that would be copied
       into or referenced by the new repo. (Audited file sizes + grepped for `run_tests.py`,
@@ -177,7 +177,7 @@ autonomously with good defaults, later confirming the upstream image. Decisions:
 
 ## Phase Exit Criteria
 
-- **Phase 0**: module-cleanup exit criteria met — no dead code/stale references the scaffold
+- **Phase 0**: code-cleanup exit criteria met — no dead code/stale references the scaffold
   would propagate, docs accurate, toolkit validations green.
 - **Phase 1**: new repo exists, submodule initialized, core files present, `AGENT_APP_SPECIFIC.md`
   rewritten for hermes, `requirements.txt` + `README.md` present, no secret files created.

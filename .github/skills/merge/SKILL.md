@@ -39,7 +39,7 @@ If any precondition is false, stop and report what must be completed before this
 
 Use this mode when the user explicitly asks to merge without a plan, asks to skip planning, or there is no planning file for the branch.
 
-- Do not fail solely because prior workflow phases or a planning file are absent.
+- In No-Plan / Skipped-Plan Mode, do not fail solely because prior workflow phases or a planning file are absent.
 - Do not create a retrospective planning file just to satisfy the merge workflow.
 - Still require a feature branch, a reviewed diff, validation evidence or a documented validation gap, and a PR report.
 - The PR report must include a `Plan Status` or equivalent section that states `No plan / planning skipped` and explains why.
@@ -119,22 +119,23 @@ If a PR already exists, update the PR body or add the report as a PR comment imm
 gh pr view --json number,url,title,isDraft --jq '"PR #\(.number): \(.url) [draft=\(.isDraft)]"'
 ```
 
-5. Check Copilot and human review feedback. Address every actionable comment with a code, doc, test, or report change, or explain clearly why no change is needed.
-6. Commit and push review fixes. This push is what should trigger a meaningful CI run.
-7. Mark the PR ready only after review feedback has been addressed:
+5. Draft review: check Copilot and human review feedback available on the draft PR. Address every actionable comment with a code, doc, test, or report change, or explain clearly why no change is needed. If the Copilot feedback was not requested, request it explicitly in the PR comments and wait for it.
+6. Draft-review fixes: commit and push any review fixes. In repos that gate CI for draft PRs, these pushes should remain quiet while the PR stays draft.
+7. Draft-review pause: if the user has **not** yet approved moving from draft review to CI, stop here and report the PR URL, whether the PR body contains the current review report, draft review feedback status, validation results, plan status or no-plan reason, and any residual risks.
+8. CI start: if the user **has** already approved moving from draft review to CI, mark the PR ready immediately. Once that approval has been granted, do not introduce another pause just because review-fix commits were pushed or CI later turns green:
 
 ```bash
 gh pr ready
 ```
 
-8. Watch CI until it finishes:
+9. CI validation: watch CI until it finishes, then continue directly to mergeability verification and merge unless GitHub reports a blocking condition or the user explicitly asked to hold before merge:
 
 ```bash
 gh pr checks --watch
 ```
 
-9. If CI fails, read the failing logs, diagnose locally, fix, commit, push, and repeat the CI check.
-10. Verify GitHub reports the PR as cleanly mergeable. Green CI alone is not enough:
+10. CI repair loop: if CI fails, read the failing logs, diagnose locally, fix, commit, push, and repeat the CI check.
+11. Merge approval gate: verify GitHub reports the PR as cleanly mergeable. Green CI alone is not enough:
 
 ```bash
 gh pr view --json mergeStateStatus,mergeable,reviewDecision,statusCheckRollup,isDraft
@@ -142,21 +143,22 @@ gh pr view --json mergeStateStatus,mergeable,reviewDecision,statusCheckRollup,is
 
 Do not merge if the PR is draft, dirty, conflicting, blocked, has required checks pending, or has unresolved required review state.
 
-11. If the PR is not mergeable, update from the base branch, resolve conflicts, rerun relevant validation, push, and wait for CI again.
-12. Merge only when CI passes and GitHub reports a clean merge state:
+12. Mergeability repair: if the PR is not mergeable, update from the base branch, resolve conflicts, rerun relevant validation, push, and wait for CI again.
+13. Merge execution: merge immediately when CI passes and GitHub reports a clean merge state. Do not ask for another approval merely because review-fix commits were pushed or because CI just completed:
 
 ```bash
 gh pr merge --squash --delete-branch
 ```
 
-13. Clean up local state:
+14. Local cleanup: clean up local state:
 
 ```bash
+current_branch="$(git branch --show-current)"
 git checkout main && git pull
-git branch -D feat/<descriptive-slug>
+git branch -D "$current_branch"
 ```
 
-14. Remove the local PR report from `out/PR/` after merge unless the repo workflow explicitly keeps PR reports.
+15. Remove the local PR report from `out/PR/` after merge unless the repo workflow explicitly keeps PR reports.
 
 ## Parallel Work Rule
 

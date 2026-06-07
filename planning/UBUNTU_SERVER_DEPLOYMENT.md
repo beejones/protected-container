@@ -30,7 +30,7 @@ GitHub automatically redirects the old URL. Existing submodule references contin
 but downstream repos should update their submodule URL at their next update:
 
 ```bash
-git submodule set-url scripts/deploy/_upstream https://github.com/beejones/protected-container
+git submodule set-url scripts/deploy/_protected-container https://github.com/beejones/protected-container
 ```
 
 Update all internal references:

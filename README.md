@@ -146,14 +146,14 @@ Best for repos that **already have their own app** and only need the deployment 
 #### 1) Vendor upstream as a git submodule
 
 ```bash
-git submodule add https://github.com/beejones/protected-container scripts/deploy/_upstream
+git submodule add https://github.com/beejones/protected-container scripts/deploy/_protected-container
 git submodule update --init --recursive
 ```
 
 To update later:
 
 ```bash
-git submodule update --remote --merge scripts/deploy/_upstream
+git submodule update --remote --merge scripts/deploy/_protected-container
 ```
 
 #### 2) Create repo-local wrapper entrypoints
