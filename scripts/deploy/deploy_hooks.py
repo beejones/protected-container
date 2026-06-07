@@ -13,7 +13,13 @@ try:
 except ImportError:
     from env_schema import VarsEnum
 
-from typing import Any, Protocol, runtime_checkable, MutableMapping
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable, MutableMapping
+
+if TYPE_CHECKING:
+    try:
+        from scripts.deploy.deploy_log import DeployLogSettings
+    except ImportError:
+        from deploy_log import DeployLogSettings
 
 logger = logging.getLogger("deploy_hooks")
 
@@ -86,6 +92,7 @@ class DeployHooksProtocol(Protocol):
     def post_render_yaml(self, ctx: DeployContext, plan: DeployPlan, yaml_text: str) -> str: ...
     def pre_az_apply(self, ctx: DeployContext, plan: DeployPlan, yaml_path: Path) -> None: ...
     def post_deploy(self, ctx: DeployContext, plan: DeployPlan, deploy_result: Any) -> None: ...
+    def configure_deploy_log(self, ctx: DeployContext, plan: DeployPlan, settings: DeployLogSettings) -> None: ...
     def on_error(self, ctx: DeployContext, exc: Exception) -> None: ...
 
 class DeployHooks:

@@ -54,8 +54,10 @@ Create a Python module that exports a `get_hooks()` function returning an object
 ### Example `deploy_customizations.py`
 
 ```python
-import os
+from pathlib import Path
+
 from scripts.deploy.deploy_hooks import DeployContext, DeployPlan
+from scripts.deploy.deploy_log import DeployLogSettings
 
 class MyHooks:
     def pre_validate_env(self, ctx: DeployContext) -> None:
@@ -76,6 +78,11 @@ class MyHooks:
     def post_render_yaml(self, ctx: DeployContext, plan: DeployPlan, yaml_text: str) -> str:
         """Called after YAML generation. Return modified YAML."""
         return yaml_text + "\n# Patched by custom hook"
+
+    def configure_deploy_log(self, ctx: DeployContext, plan: DeployPlan, settings: DeployLogSettings) -> None:
+        """Called before ubuntu_deploy.py writes the deploy tracking CSV."""
+        settings.versioning_enabled = False
+        settings.csv_path = Path("out/custom/deploy_log.csv")
 
 def get_hooks():
     return MyHooks()
@@ -119,6 +126,15 @@ For `ubuntu_deploy.py`, `deploy_result` includes:
 - `storage_registration_count`
 - `storage_manager_api_url`
 - `default_storage_registration_enabled`
+
+### `configure_deploy_log(ctx, plan, settings)`
+- **Summary**: Before `ubuntu_deploy.py` writes `deploy_log.csv`.
+- **Use for**: Customizing where deploy tracking is written and whether deploy tracking bumps `APP_VERSION`.
+
+The `settings` object is mutable:
+
+- `settings.csv_path` (`Path`): CSV path to write. Relative paths are resolved from `ctx.repo_root`.
+- `settings.versioning_enabled` (`bool`, default `True`): when `False`, deploy rows still record the current `APP_VERSION`, but successful `production` and `swap` deploys do not increment or write `APP_VERSION` back to `.env`.
 
 ### `on_error(ctx, exc)`
 - **Summary**: If an exception occurs during the deployment lifecycle.

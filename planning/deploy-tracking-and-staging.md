@@ -61,10 +61,11 @@
 - [x] Add `APP_VERSION=0.1.0` to `.env` (runtime config, read at deploy time)
 - [x] Add `APP_VERSION` to `env_schema.py` RUNTIME_SCHEMA (optional, default `0.0.0`)
 - [x] Create `scripts/deploy/deploy_log.py` with:
-  - `append_deploy_record(repo_root, git_ref, version, target, stack_name, domain, image, status)` → writes newest row below the header
-  - CSV columns: `timestamp,git_ref,version,target,stack_name,domain,image,status`
+  - `append_deploy_record(...)` / `append_deploy_record_with_settings(...)` → writes newest row below the header
+  - CSV columns: `timestamp,git_ref,local_branch,version,target,stack_name,domain,image,status`
   - Auto-creates `out/deploy/` directory if missing
   - `git_ref` = full 40-char SHA from `git rev-parse HEAD`
+  - `local_branch` = checked-out deploy branch, with legacy rows backfilled as `main`
   - `version` = read from `.env` key `APP_VERSION`
   - After successful **production** deploy: auto-increment patch in `.env` (`1.2.3` → `1.2.4`) so next deploy gets a new version
   - Staging and swap deploys: log current version but do NOT increment
@@ -234,3 +235,4 @@ After swap:
 - [x] Tests for stop/start lifecycle logic
 - [x] Latest `out/deploy/deploy_log.csv` record is written directly below the header
 - [x] Deploy log includes APP_VERSION in the `version` column for staging, production, and swap records
+- [x] Deploy log includes the checked-out branch in the `local_branch` column
