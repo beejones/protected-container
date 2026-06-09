@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.3] - 2026-06-09
 
+Pull Request: [#33](https://github.com/beejones/protected-container/pull/33)
+
 ### New Capabilities
 
 - Added a protected deploy changelog gate so automatic `APP_VERSION` bumps for new git refs require a matching `CHANGELOG.md` release entry prepared by `/changelog`.
