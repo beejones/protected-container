@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.4] - 2026-06-09
 
+Pull Request: [#34](https://github.com/beejones/protected-container/pull/34)
+
 ### New Capabilities
 
 - Clarified the protected merge and changelog workflows so `/changelog` bumps `APP_VERSION` before main-bound merges.
