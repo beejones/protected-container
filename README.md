@@ -184,7 +184,7 @@ Common hook uses:
 
 - Allowing additional runtime keys beyond the upstream schema
 - Translating legacy deploy keys (e.g. `GHCR_IMAGE` → `APP_IMAGE`)
-- Customizing deploy log location or disabling deploy-log version bumps
+- Customizing version log location or disabling deploy version preflight checks
 - Post-processing the rendered ACI YAML / Caddyfile (e.g. injecting additional reverse-proxy routes)
 
 #### 4) Ensure CI checks out submodules

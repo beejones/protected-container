@@ -1019,7 +1019,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     hooks.call("configure_deploy_log", hook_ctx, hook_plan, deploy_log_settings)
     if not deploy_log_settings.versioning_enabled:
         log_info("Deploy log versioning disabled by deploy hook.", icon="🪝")
-    deploy_log.require_changelog_for_pending_version_increment(
+    deploy_log.require_changelog_for_pending_version_record(
         repo_root=repo_root,
         settings=deploy_log_settings,
         status="success",
@@ -1403,7 +1403,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         },
     )
 
-    # --- Deploy tracking CSV ------------------------------------------------
+    # --- Version log CSV ----------------------------------------------------
     deploy_log.append_deploy_record_with_settings(
         repo_root=repo_root,
         settings=deploy_log_settings,

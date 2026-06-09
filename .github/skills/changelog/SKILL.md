@@ -1,15 +1,15 @@
 ---
 name: changelog
-description: "Use when: updating CHANGELOG.md, preparing deploy-managed APP_VERSION targets for main-bound merges, turning PR reports into release notes, and documenting new capabilities, fixed bugs, and touched models."
+description: "Use when: updating CHANGELOG.md, incrementing APP_VERSION in .env for main-bound merges, turning PR reports into release notes, and documenting new capabilities, fixed bugs, and touched models."
 ---
 
 # Changelog Workflow
 
 ## Purpose
 
-Use this skill from the merge workflow before a PR is created, updated for final review, or merged into `main`. It turns the PR report into release notes, prepares the next release version entry, and records the models touched by the change.
+Use this skill from the merge workflow before a PR is created, updated for final review, or merged into `main`. It turns the PR report into release notes, bumps the app version, and records the models touched by the change.
 
-In `_protected-container`, `ubuntu_deploy.py` owns the actual `APP_VERSION` write for deploy-managed releases. The changelog step prepares the matching `CHANGELOG.md` entry for the next patch version so the first successful deploy of a new git ref can increment `.env` safely. Do not pre-bump `.env` during normal deploy-managed release preparation.
+In `_protected-container`, `/changelog` owns the `APP_VERSION` bump for main-bound merges. `ubuntu_deploy.py` only verifies that the current `.env` version already has a matching `CHANGELOG.md` entry before it records a new git ref in the deploy log.
 
 `CHANGELOG.md` is the correct conventional filename for release notes in this repo. Use the root `CHANGELOG.md` file. If it is empty, initialize it with:
 
@@ -24,24 +24,23 @@ All notable changes to this project will be documented in this file.
 - A current PR report exists under `out/PR/Review_<branch_slug>.md`.
 - The implementation and validation work is complete enough for merge preparation.
 - Do not read `.env.secrets` or `.env.deploy.secrets`.
-- Use the root `.env` only to read `APP_VERSION` and derive the target deploy version.
-- Remember that `.env*` is ignored by default in this repo. Do not force-add `.env`; for deploy-managed releases, leave the `APP_VERSION` baseline unchanged until `ubuntu_deploy.py` writes the target version after a successful deploy.
+- Use the root `.env` only for `APP_VERSION`.
+- Remember that `.env*` is ignored by default in this repo. Do not force-add `.env`; treat the `APP_VERSION` edit as local runtime configuration unless the repo has intentionally changed that tracking behavior.
 
 If the PR report is stale, regenerate it before writing release notes. If the version class or touched models are unclear, ask the user before editing the changelog.
 
-## Version Target
+## Version Bump
 
-Derive the target release version from root `.env` exactly once per PR that will merge to `main`.
+Increment `APP_VERSION` in the root `.env` exactly once per PR that will merge to `main`.
 
 - Default to a patch bump, for example `0.11.10` -> `0.11.11`.
 - Use a minor bump for a substantial new user-facing capability or API expansion.
 - Use a major bump only for intentional breaking behavior or migration requirements.
 - If `APP_VERSION` is missing, duplicated, or not valid `x.y.z` semver, stop and report the blocker.
-- If the branch already contains a changelog entry for the same PR, update the existing entry instead of choosing another version.
+- If the branch already contains a changelog entry and version bump for the same PR, update the existing entry instead of bumping again.
 - If the branch is rebased or updated from `main` and another merge consumed the target version, bump to the next available version and update the changelog heading.
-- For deploy-managed releases, do not write the target version back to `.env`; `deploy_log.py` persists it after the first successful deploy record for the new git ref.
 
-Verify the local deploy baseline before editing release notes:
+Verify the local version after editing:
 
 ```bash
 grep '^APP_VERSION=' .env
@@ -92,7 +91,7 @@ Use the PR report as the primary source. Use commits and diffs only to verify ac
 2. Identify the version bump class: patch, minor, or major.
 3. Identify touched models from the PR report; if the report does not say, inspect the diff enough to answer accurately without turning the changelog into a file list.
 4. Resolve the PR URL if available, preferring the PR report and then `gh pr view --json number,url` for the current branch. If no PR exists yet, continue without a PR line.
-5. Leave root `.env` unchanged for deploy-managed releases so `ubuntu_deploy.py` can persist the target version after the first successful deploy of the new git ref.
+5. Update root `.env` `APP_VERSION`.
 6. Update root `CHANGELOG.md` with the new version entry.
 7. Review the changelog entry for these gates:
    - It has `New Capabilities`, `Fixed Bugs`, and `Touched Models` sections.
@@ -107,8 +106,8 @@ Use the PR report as the primary source. Use commits and diffs only to verify ac
 
 The changelog step is complete when:
 
-- Root `.env` has a valid current `APP_VERSION` baseline, and the target version has been derived from it.
-- Root `CHANGELOG.md` has the target version entry dated with the merge preparation date.
+- `APP_VERSION` in root `.env` has been bumped once for the main-bound merge, or a clear blocker is reported.
+- Root `CHANGELOG.md` has a versioned entry dated with the merge preparation date.
 - The changelog entry includes a PR link when one is available.
 - The entry summarizes capabilities and fixes, not changed files.
 - Touched models are named, or the entry states `None.`.

@@ -1,10 +1,10 @@
-# Deploy Tracking CSV & Staging Environment
+# Version Log CSV & Staging Environment
 
 ## Principles
 
 - **Deploy history is observable**: Every successful deploy writes a row to a CSV log so operators can trace exactly what was deployed and when. The newest row appears directly below the header.
 - **Git commit is the rollback anchor**: The CSV records the **full 40-char commit SHA** (`git rev-parse HEAD`) so you can always `git checkout <sha>` to reproduce exactly what was deployed.
-- **Version lives in `.env` as `APP_VERSION`**: Format `x.y.z` (semver). The deploy script reads it, logs it to the CSV, and optionally auto-increments the patch (`z`) for the first successful deploy record of a new git ref only after `/changelog` has prepared the matching `CHANGELOG.md` entry. Later staging, production, or swap records for the same git ref reuse that version.
+- **Version lives in `.env` as `APP_VERSION`**: Format `x.y.z` (semver). `/changelog` bumps it for main-bound merges and writes the matching `CHANGELOG.md` entry. The deploy script reads that prepared version, logs it to the CSV for the first successful deploy record of a new git ref, and requires the matching changelog entry. Later staging, production, or swap records for the same git ref reuse the logged version.
 - **CSV columns and their purpose**:
   | Column | Value | Why |
   |--------|-------|-----|
@@ -27,7 +27,7 @@
   3. Updates/starts the production Portainer stack from the Compose/image contract
   4. Stops staging containers via Portainer API
   5. Keeps Caddy routing on `PUBLIC_DOMAIN` → production stack
-  6. Logs a `swap` event to the deploy CSV without incrementing `APP_VERSION` again when staging already recorded the same git ref
+  6. Logs a `swap` event to the version CSV, reusing the staged version when staging already recorded the same git ref
 
   **Why not route production to staging?** Staging must remain stopped after deploy and after swap. Promoting into production preserves the stable public route while keeping staging as a stopped predeploy candidate.
 
@@ -57,7 +57,7 @@
 - [x] Remove any dead code found
 - [x] Verify existing tests pass after cleanup (`pytest -q`)
 
-### Phase 1 — Deploy Tracking CSV (`out/deploy/deploy_log.csv`)
+### Phase 1 — Version Log CSV (`out/deploy/version_log.csv`)
 - [x] Add `APP_VERSION=0.1.0` to `.env` (runtime config, read at deploy time)
 - [x] Add `APP_VERSION` to `env_schema.py` RUNTIME_SCHEMA (optional, default `0.0.0`)
 - [x] Create `scripts/deploy/deploy_log.py` with:
@@ -67,7 +67,7 @@
   - `git_ref` = full 40-char SHA from `git rev-parse HEAD`
   - `local_branch` = checked-out deploy branch, with legacy rows backfilled as `main`
   - `version` = read from `.env` key `APP_VERSION`
-  - After the first successful deploy record for a new git ref: auto-increment patch in `.env` (`1.2.3` -> `1.2.4`) so each git ref gets one release version, but only if `CHANGELOG.md` already has the target `## [1.2.4]` entry from `/changelog`
+  - After the first successful deploy record for a new git ref: record the current `.env` `APP_VERSION` so each git ref gets one release version, but only if `CHANGELOG.md` already has the matching version entry from `/changelog`
   - Repeated staging, production, and swap deploys for the same git ref: log current version but do NOT increment
 - [x] Integrate `append_deploy_record` call at end of `ubuntu_deploy.py` main()
 - [x] Add `out/deploy/` to `.gitignore` (tracking CSV is local state, not committed)
@@ -92,7 +92,7 @@
   - Updates/starts the production Portainer stack from the Compose/image contract
   - Keeps Caddy routing on `PUBLIC_DOMAIN` → production stack
   - Stops staging containers via Portainer API
-  - Writes a `swap` event to the deploy CSV without incrementing `APP_VERSION` again when staging already recorded the same git ref
+  - Writes a `swap` event to the version CSV, reusing the staged version when staging already recorded the same git ref
   - Fails clearly if staging has not been deployed yet
 - [x] Write integration tests for swap promotion logic (mock SSH + Portainer calls)
 
@@ -170,7 +170,7 @@ timestamp,git_ref,version,target,stack_name,domain,image,status
 3. Update/start the production Portainer stack
 4. Stop staging containers through the Portainer API
 5. Keep Caddy routing on `PUBLIC_DOMAIN` → production stack
-6. Log a `swap` event to CSV without incrementing `APP_VERSION` again when staging already recorded the same git ref
+6. Log a `swap` event to CSV, reusing the staged version when staging already recorded the same git ref
 
 This is a **promotion swap**: public traffic always routes to production, and staging is stopped after staging deploys and after swaps.
 
@@ -223,12 +223,12 @@ After swap:
   2. Promote the staged configuration to the production stack
   3. Keep Caddy routing on `PUBLIC_DOMAIN` → production stack
   4. Stop staging containers
-  5. Log swap event to CSV without incrementing `APP_VERSION` again when staging already recorded the same git ref
+  5. Log swap event to CSV, reusing the staged version when staging already recorded the same git ref
 - [x] Rollback uses the deploy-log `git_ref` and a production deploy
 - [x] Storage-manager only runs on the active stack — no cleanup conflict
 - [x] Update `docs/deploy/STAGING.md` with the shared-volume model
 - [x] Add deploy message: show which containers are being stopped/started
 - [x] Tests for stop/start lifecycle logic
-- [x] Latest `out/deploy/deploy_log.csv` record is written directly below the header
-- [x] Deploy log includes APP_VERSION in the `version` column for staging, production, and swap records
-- [x] Deploy log includes the checked-out branch in the `local_branch` column
+- [x] Latest `out/deploy/version_log.csv` record is written directly below the header
+- [x] Version log includes APP_VERSION in the `version` column for staging, production, and swap records
+- [x] Version log includes the checked-out branch in the `local_branch` column
