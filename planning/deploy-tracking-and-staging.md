@@ -4,7 +4,7 @@
 
 - **Deploy history is observable**: Every successful deploy writes a row to a CSV log so operators can trace exactly what was deployed and when. The newest row appears directly below the header.
 - **Git commit is the rollback anchor**: The CSV records the **full 40-char commit SHA** (`git rev-parse HEAD`) so you can always `git checkout <sha>` to reproduce exactly what was deployed.
-- **Version lives in `.env` as `APP_VERSION`**: Format `x.y.z` (semver). The deploy script reads it, logs it to the CSV, and optionally auto-increments the patch (`z`) after a successful production deploy. Staging and swap deploy records log the version but do NOT auto-increment.
+- **Version lives in `.env` as `APP_VERSION`**: Format `x.y.z` (semver). The deploy script reads it, logs it to the CSV, and optionally auto-increments the patch (`z`) for the first successful deploy record of a new git ref only after `/changelog` has prepared the matching `CHANGELOG.md` entry. Later staging, production, or swap records for the same git ref reuse that version.
 - **CSV columns and their purpose**:
   | Column | Value | Why |
   |--------|-------|-----|
@@ -27,7 +27,7 @@
   3. Updates/starts the production Portainer stack from the Compose/image contract
   4. Stops staging containers via Portainer API
   5. Keeps Caddy routing on `PUBLIC_DOMAIN` → production stack
-  6. Logs a `swap` event to the deploy CSV without incrementing `APP_VERSION`
+  6. Logs a `swap` event to the deploy CSV without incrementing `APP_VERSION` again when staging already recorded the same git ref
 
   **Why not route production to staging?** Staging must remain stopped after deploy and after swap. Promoting into production preserves the stable public route while keeping staging as a stopped predeploy candidate.
 
@@ -67,8 +67,8 @@
   - `git_ref` = full 40-char SHA from `git rev-parse HEAD`
   - `local_branch` = checked-out deploy branch, with legacy rows backfilled as `main`
   - `version` = read from `.env` key `APP_VERSION`
-  - After successful **production** deploy: auto-increment patch in `.env` (`1.2.3` → `1.2.4`) so next deploy gets a new version
-  - Staging and swap deploys: log current version but do NOT increment
+  - After the first successful deploy record for a new git ref: auto-increment patch in `.env` (`1.2.3` -> `1.2.4`) so each git ref gets one release version, but only if `CHANGELOG.md` already has the target `## [1.2.4]` entry from `/changelog`
+  - Repeated staging, production, and swap deploys for the same git ref: log current version but do NOT increment
 - [x] Integrate `append_deploy_record` call at end of `ubuntu_deploy.py` main()
 - [x] Add `out/deploy/` to `.gitignore` (tracking CSV is local state, not committed)
 - [x] Write unit tests for `deploy_log.py` (CSV creation, newest-first ordering, column integrity, version increment)
@@ -92,7 +92,7 @@
   - Updates/starts the production Portainer stack from the Compose/image contract
   - Keeps Caddy routing on `PUBLIC_DOMAIN` → production stack
   - Stops staging containers via Portainer API
-  - Writes a `swap` event to the deploy CSV without incrementing `APP_VERSION`
+  - Writes a `swap` event to the deploy CSV without incrementing `APP_VERSION` again when staging already recorded the same git ref
   - Fails clearly if staging has not been deployed yet
 - [x] Write integration tests for swap promotion logic (mock SSH + Portainer calls)
 
@@ -170,7 +170,7 @@ timestamp,git_ref,version,target,stack_name,domain,image,status
 3. Update/start the production Portainer stack
 4. Stop staging containers through the Portainer API
 5. Keep Caddy routing on `PUBLIC_DOMAIN` → production stack
-6. Log a `swap` event to CSV without incrementing `APP_VERSION`
+6. Log a `swap` event to CSV without incrementing `APP_VERSION` again when staging already recorded the same git ref
 
 This is a **promotion swap**: public traffic always routes to production, and staging is stopped after staging deploys and after swaps.
 
@@ -179,8 +179,6 @@ This is a **promotion swap**: public traffic always routes to production, and st
 ## Follow-up: Volume Safety During Swap (Phase 6)
 
 ### Problem
-
-After the initial Caddy-only swap design, containers and their volumes did NOT move. That meant the staging container had different (potentially empty) volumes from production. We need staging to use production data so it can be validated with real state while still ending with production as the only routed runtime.
 
 ### Revised Design: Shared Volumes + Production Promotion
 
@@ -192,17 +190,15 @@ Instead of two independent stacks with separate volumes, staging and production 
 
 2. **`--prod`**: Update/start the production containers. If the staging containers exist, stop them after production is running. Production serves traffic on the production domain.
 
-3. **`--swap`**: Promote the staged build into the production stack, keep Caddy routing on `PUBLIC_DOMAIN`, then stop staging. The deploy log records target `swap`, and APP_VERSION is not incremented for an identical `git_ref` promotion.
-
-### Architecture After Swap
+3. **`--swap`**: Promote the staged build into the production stack, keep Caddy routing on `PUBLIC_DOMAIN`, then stop staging. The deploy log records target `swap` and does not increment `APP_VERSION` again when staging already recorded the same git ref.
 
 ```
 Before swap:
-  prod domain  → prod containers (running, prod volumes)
+  prod domain  -> prod containers (running, prod volumes)
   staging containers (stopped, same prod volumes)
 
 After swap:
-  prod domain  → prod containers (running promoted build, prod volumes)
+  prod domain  -> prod containers (running promoted build, prod volumes)
   staging containers (stopped, same prod volumes)
 ```
 
@@ -227,7 +223,7 @@ After swap:
   2. Promote the staged configuration to the production stack
   3. Keep Caddy routing on `PUBLIC_DOMAIN` → production stack
   4. Stop staging containers
-  5. Log swap event to CSV without incrementing `APP_VERSION`
+  5. Log swap event to CSV without incrementing `APP_VERSION` again when staging already recorded the same git ref
 - [x] Rollback uses the deploy-log `git_ref` and a production deploy
 - [x] Storage-manager only runs on the active stack — no cleanup conflict
 - [x] Update `docs/deploy/STAGING.md` with the shared-volume model

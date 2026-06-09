@@ -58,7 +58,7 @@ Staging is the default target:
 source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py
 ```
 
-This deploys using `STAGING_*` overrides for domain, remote dir, and stack name. Containers are **created and then stopped via Portainer API**. All other settings (SSH host, compose files, hooks) are shared.
+This deploys using `STAGING_*` overrides for domain, remote dir, and stack name. Containers are **created and then stopped via Portainer API**. All other settings (SSH host, compose files, hooks) are shared. If this is the first successful deploy record for the current git ref, the deploy log increments `APP_VERSION` only after `CHANGELOG.md` already contains the target version entry from `/changelog`; later staging, production, or swap deploys for the same git ref reuse that version.
 
 ## Deploy to Production
 
@@ -68,7 +68,7 @@ Pass `--prod` to target production:
 source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py --prod
 ```
 
-This updates and starts production containers, then stops any staging containers. A successful production deploy auto-increments `APP_VERSION` patch in `.env`.
+This updates and starts production containers, then stops any staging containers. If this is the first successful deploy record for the current git ref, the deploy log increments `APP_VERSION` patch in `.env` only after `/changelog` has prepared the matching `CHANGELOG.md` entry; repeated deploys of the same git ref do not increment it again.
 
 ## Promote Staging to Production
 
@@ -83,8 +83,8 @@ This:
 2. Renders the production stack from the same Compose contract and configured images
 3. Updates/starts the production Portainer stack
 4. Stops staging containers via Portainer API
-5. Keeps Caddy routing on `PUBLIC_DOMAIN` → production stack
-6. Logs a `swap` event to the deploy CSV and increments `APP_VERSION` when the promoted git ref differs from the latest successful production/swap record
+5. Keeps Caddy routing on `PUBLIC_DOMAIN` -> production stack
+6. Logs a `swap` event to the deploy CSV and increments `APP_VERSION` only when the promoted git ref has no earlier successful deploy record and `/changelog` has prepared the target version entry
 
 Rollback uses a normal production deploy from the desired `git_ref` recorded in the deploy log.
 
@@ -104,7 +104,7 @@ Every deploy writes a row to `out/deploy/deploy_log.csv`. The latest record appe
 | `image` | Container image deployed |
 | `status` | `success` / `failed` |
 
-`APP_VERSION` is recorded in the `version` column for every deploy. Successful production deploys write the incremented patch version into the CSV row and persist the same version back to `.env`. `swap` records increment the patch version when they promote a different git ref than the latest successful `production` or `swap` row; repeated swaps of the same git ref do not increment again. Staging records never increment `APP_VERSION`.
+`APP_VERSION` is recorded in the `version` column for every deploy. The first successful deploy record for a new git ref writes the incremented patch version into the CSV row and persists the same version back to `.env` only when `CHANGELOG.md` already has a `## [x.y.z]` entry for that incremented version. Run `/changelog` before deploying a new git ref. Later staging, production, or swap records for the same git ref reuse that version and do not increment again. Failed deploys never increment `APP_VERSION`.
 
 **Rollback from CSV**: Find the latest `production` or `swap` + `success` row, use `git_ref` to checkout that commit, redeploy with `--prod`.
 
