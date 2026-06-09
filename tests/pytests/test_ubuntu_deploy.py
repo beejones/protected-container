@@ -174,7 +174,7 @@ def test_swap_promotes_to_production_stack_and_stops_only_staging(tmp_path, monk
             if hook_name == "configure_deploy_log":
                 settings = args[2]
                 settings.versioning_enabled = False
-                settings.csv_path = Path("out/custom/deploy_log.csv")
+                settings.csv_path = Path("out/custom/version_log.csv")
             return None
 
     class DummyResult:
@@ -229,7 +229,7 @@ def test_swap_promotes_to_production_stack_and_stops_only_staging(tmp_path, monk
     ) -> Path:
         deploy_record_targets.append(target)
         deploy_record_settings.append(settings)
-        return repo_root / "deploy_log.csv"
+        return repo_root / "version_log.csv"
 
     monkeypatch.setattr(
         "scripts.deploy.ubuntu_deploy.deploy_log.append_deploy_record_with_settings",
@@ -243,14 +243,14 @@ def test_swap_promotes_to_production_stack_and_stops_only_staging(tmp_path, monk
     assert state_calls == [("staging-protected-container", "stop")]
     assert deploy_record_targets == ["swap"]
     assert deploy_record_settings[0].versioning_enabled is False
-    assert deploy_record_settings[0].csv_path == Path("out/custom/deploy_log.csv")
+    assert deploy_record_settings[0].csv_path == Path("out/custom/version_log.csv")
 
 
 def test_main_requires_changelog_entry_before_remote_work(tmp_path, monkeypatch):
     (tmp_path / "docker").mkdir()
     (tmp_path / "docker" / "docker-compose.yml").write_text("services: {}\n")
     (tmp_path / "docker" / "docker-compose.ubuntu.yml").write_text("services: {}\n")
-    (tmp_path / ".env").write_text("APP_VERSION=1.2.3\n")
+    (tmp_path / ".env").write_text("APP_VERSION=1.2.4\n")
     (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## [1.2.3] - 2026-06-09\n")
     (tmp_path / ".env.deploy").write_text(
         "\n".join(

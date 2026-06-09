@@ -2,13 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.4] - 2026-06-09
+
+Pull Request: [#34](https://github.com/beejones/protected-container/pull/34)
+
+### New Capabilities
+
+- Clarified the protected merge and changelog workflows so `/changelog` bumps `APP_VERSION` before main-bound merges.
+- Added post-merge version-log recording so the merged git ref is recorded before deploy.
+- Renamed the default deploy tracking CSV from `out/deploy/deploy_log.csv` to `out/deploy/version_log.csv`.
+- Updated deploy documentation to describe deploy logging as a verifier and recorder of prepared release versions.
+
+### Fixed Bugs
+
+- Fixed deploy logging so new git refs record the already-prepared `APP_VERSION` instead of incrementing at deploy time.
+- Fixed repeated deploys of an already logged git ref so they reuse that git ref's recorded version even if local `.env` has advanced for a later release.
+- Fixed direct post-merge deploys so the merge record can seed the version for the same git ref before deployment starts.
+
+### Touched Models
+
+- Version-log CSV versioning contract.
+
 ## [0.2.3] - 2026-06-09
 
 Pull Request: [#33](https://github.com/beejones/protected-container/pull/33)
 
 ### New Capabilities
 
-- Added a protected deploy changelog gate so automatic `APP_VERSION` bumps for new git refs require a matching `CHANGELOG.md` release entry prepared by `/changelog`.
+- Added a protected deploy changelog gate so new git refs require a matching `APP_VERSION` and `CHANGELOG.md` release entry prepared by `/changelog`.
 - Added an Ubuntu deploy preflight that validates the changelog gate before SSH or Portainer deployment work starts.
 
 ### Fixed Bugs
@@ -20,7 +41,7 @@ Pull Request: [#33](https://github.com/beejones/protected-container/pull/33)
 ### Touched Models
 
 - `DeployLogSettings` deploy hook settings dataclass.
-- Deploy tracking CSV versioning contract.
+- Version-log CSV versioning contract.
 
 ## [0.2.2] - 2026-05-18
 
