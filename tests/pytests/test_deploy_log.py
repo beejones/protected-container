@@ -25,6 +25,8 @@ def tmp_repo(tmp_path: Path) -> Path:
     """Create a minimal repo root with .env containing APP_VERSION."""
     env_file = tmp_path / ".env"
     env_file.write_text("APP_VERSION=1.2.3\nBASIC_AUTH_USER=admin\n")
+    changelog_file = tmp_path / "CHANGELOG.md"
+    changelog_file.write_text("# Changelog\n\n## [1.2.4] - 2026-06-09\n")
     return tmp_path
 
 
@@ -187,7 +189,14 @@ class TestAppendDeployRecord:
         content = (tmp_repo / ".env").read_text()
         assert "APP_VERSION=1.2.4" in content
 
-    def test_staging_success_does_not_increment(self, tmp_repo: Path) -> None:
+    def test_staging_success_for_same_git_ref_does_not_increment_again(self, tmp_repo: Path) -> None:
+        csv_path = tmp_repo / "out" / "deploy" / "deploy_log.csv"
+        csv_path.parent.mkdir(parents=True)
+        with csv_path.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(CSV_COLUMNS)
+            writer.writerow(["2026-05-18T00:00:00Z", "e" * 40, "main", "1.2.3", "staging", "stg-stack", "stg.example.com", "img", "success"])
+
         append_deploy_record(
             repo_root=tmp_repo,
             target="staging",
@@ -200,6 +209,50 @@ class TestAppendDeployRecord:
         )
         content = (tmp_repo / ".env").read_text()
         assert "APP_VERSION=1.2.3" in content
+
+    def test_staging_success_for_new_git_ref_increments_version(self, tmp_repo: Path) -> None:
+        csv_path = tmp_repo / "out" / "deploy" / "deploy_log.csv"
+        csv_path.parent.mkdir(parents=True)
+        with csv_path.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(CSV_COLUMNS)
+            writer.writerow(["2026-05-18T00:00:00Z", "0" * 40, "main", "1.2.3", "swap", "prod-stack", "prod.example.com", "img", "success"])
+
+        csv_path = append_deploy_record(
+            repo_root=tmp_repo,
+            target="staging",
+            stack_name="stg-stack",
+            domain="stg.example.com",
+            image="img",
+            status="success",
+            git_ref="1" * 40,
+            local_branch="release/deploy",
+        )
+
+        rows = list(csv.reader(csv_path.open()))
+        assert rows[1][3] == "1.2.4"
+        assert rows[1][4] == "staging"
+        content = (tmp_repo / ".env").read_text()
+        assert "APP_VERSION=1.2.4" in content
+
+    def test_new_git_ref_increment_requires_changelog_entry(self, tmp_repo: Path) -> None:
+        (tmp_repo / "CHANGELOG.md").write_text("# Changelog\n\n## [1.2.3] - 2026-06-08\n")
+
+        with pytest.raises(RuntimeError, match="Run /changelog"):
+            append_deploy_record(
+                repo_root=tmp_repo,
+                target="staging",
+                stack_name="stg-stack",
+                domain="stg.example.com",
+                image="img",
+                status="success",
+                git_ref="1" * 40,
+                local_branch="release/deploy",
+            )
+
+        content = (tmp_repo / ".env").read_text()
+        assert "APP_VERSION=1.2.3" in content
+        assert not get_csv_path(tmp_repo).exists()
 
     def test_swap_success_for_new_git_ref_increments_version(self, tmp_repo: Path) -> None:
         csv_path = tmp_repo / "out" / "deploy" / "deploy_log.csv"
@@ -234,6 +287,33 @@ class TestAppendDeployRecord:
             writer = csv.writer(f)
             writer.writerow(CSV_COLUMNS)
             writer.writerow(["2026-05-18T00:00:00Z", "1" * 40, "main", "1.2.4", "swap", "prod-stack", "prod.example.com", "img", "success"])
+
+        csv_path = append_deploy_record(
+            repo_root=tmp_repo,
+            target="swap",
+            stack_name="prod-stack",
+            domain="prod.example.com",
+            image="img",
+            status="success",
+            git_ref="1" * 40,
+            local_branch="release/deploy",
+        )
+
+        rows = list(csv.reader(csv_path.open()))
+        assert rows[1][3] == "1.2.4"
+        assert rows[1][4] == "swap"
+        content = (tmp_repo / ".env").read_text()
+        assert "APP_VERSION=1.2.4" in content
+
+    def test_swap_success_after_staging_same_git_ref_does_not_increment_again(self, tmp_repo: Path) -> None:
+        _write_app_version(tmp_repo, "1.2.4")
+        csv_path = tmp_repo / "out" / "deploy" / "deploy_log.csv"
+        csv_path.parent.mkdir(parents=True)
+        with csv_path.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(CSV_COLUMNS)
+            writer.writerow(["2026-05-18T00:05:00Z", "1" * 40, "release/deploy", "1.2.4", "staging", "stg-stack", "stg.example.com", "img", "success"])
+            writer.writerow(["2026-05-18T00:00:00Z", "0" * 40, "main", "1.2.3", "swap", "prod-stack", "prod.example.com", "img", "success"])
 
         csv_path = append_deploy_record(
             repo_root=tmp_repo,

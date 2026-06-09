@@ -1015,6 +1015,16 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     resolved_storage_manager_api_url = hook_storage_api_url or resolved_storage_manager_api_url
     default_storage_registration_enabled = bool(hook_plan.extra_metadata.get("enable_default_storage_registration", True))
 
+    deploy_log_settings = deploy_log.default_deploy_log_settings(repo_root)
+    hooks.call("configure_deploy_log", hook_ctx, hook_plan, deploy_log_settings)
+    if not deploy_log_settings.versioning_enabled:
+        log_info("Deploy log versioning disabled by deploy hook.", icon="🪝")
+    deploy_log.require_changelog_for_pending_version_increment(
+        repo_root=repo_root,
+        settings=deploy_log_settings,
+        status="success",
+    )
+
     log_step(f"Prepared deployment plan [{deploy_target.upper()}]", icon="🧭")
     log_info(f"Target environment: {deploy_target}")
     log_info(f"Version: {deploy_log._read_app_version(repo_root)}")
@@ -1394,12 +1404,6 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     )
 
     # --- Deploy tracking CSV ------------------------------------------------
-    deploy_log_settings = deploy_log.default_deploy_log_settings(repo_root)
-    hooks.call("configure_deploy_log", hook_ctx, hook_plan, deploy_log_settings)
-
-    if not deploy_log_settings.versioning_enabled:
-        log_info("Deploy log versioning disabled by deploy hook.", icon="🪝")
-
     deploy_log.append_deploy_record_with_settings(
         repo_root=repo_root,
         settings=deploy_log_settings,
