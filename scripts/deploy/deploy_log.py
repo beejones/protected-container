@@ -5,9 +5,10 @@ the git ref, local branch, version, target environment, stack name, domain,
 image, and status.
 Newest records are stored directly under the CSV header.
 
-For a new git ref, the current APP_VERSION must already have a matching
-CHANGELOG.md entry from /changelog. Later deploy records for that same git ref
-reuse the version already recorded in the deploy log.
+For a merged git ref, the version log increments APP_VERSION and records that
+version after /changelog has prepared the matching CHANGELOG.md entry. Later
+deploy records for that same git ref reuse the version already recorded in the
+version log.
 """
 
 from __future__ import annotations
@@ -47,6 +48,7 @@ LEGACY_CSV_COLUMNS = [
 ]
 
 _CHANGELOG_VERSION_HEADING_RE = re.compile(r"^## \[(?P<version>\d+\.\d+\.\d+)\]")
+_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 _GIT_REF_COLUMN = CSV_COLUMNS.index("git_ref")
 _STATUS_COLUMN = CSV_COLUMNS.index("status")
 _MERGE_TARGET = "merge"
@@ -99,6 +101,15 @@ def _read_app_version(repo_root: Path) -> str:
     return str(values.get("APP_VERSION") or "0.0.0").strip() or "0.0.0"
 
 
+def _increment_patch(version: str) -> str:
+    """Increment the patch component of a semver string."""
+    match = _SEMVER_RE.match(version.strip())
+    if not match:
+        raise RuntimeError("APP_VERSION must be valid x.y.z semver before recording a merged git ref.")
+    major, minor, patch = int(match.group(1)), int(match.group(2)), int(match.group(3))
+    return f"{major}.{minor}.{patch + 1}"
+
+
 def _write_app_version(repo_root: Path, new_version: str) -> None:
     """Update APP_VERSION in .env in-place."""
     env_path = repo_root / ".env"
@@ -132,11 +143,11 @@ def _changelog_has_version_entry(repo_root: Path, version: str) -> bool:
 
 
 def _require_changelog_entry_for_version(repo_root: Path, version: str) -> None:
-    """Fail before deploying a version that /changelog has not prepared."""
+    """Fail before recording a version that /changelog has not prepared."""
     if _changelog_has_version_entry(repo_root, version):
         return
     raise RuntimeError(
-        f"CHANGELOG.md is missing an entry for {version}. Run /changelog before deploying a new git ref."
+        f"CHANGELOG.md is missing an entry for {version}. Run /changelog before recording a new git ref."
     )
 
 
@@ -155,18 +166,6 @@ def _resolve_csv_path(*, repo_root: Path, csv_path: Path) -> Path:
     if csv_path.is_absolute():
         return csv_path
     return repo_root / csv_path
-
-
-def _latest_successful_deploy_git_ref(existing_rows: list[list[str]]) -> str:
-    """Return the newest successful deploy git ref from existing CSV rows."""
-    for row in existing_rows:
-        if len(row) < len(CSV_COLUMNS):
-            continue
-        git_ref = str(row[_GIT_REF_COLUMN] or "").strip()
-        status = str(row[_STATUS_COLUMN] or "").strip()
-        if status == "success" and git_ref:
-            return git_ref
-    return ""
 
 
 def _successful_deploy_version_for_git_ref(*, git_ref: str, existing_rows: list[list[str]]) -> str:
@@ -203,15 +202,15 @@ def _read_existing_deploy_rows(csv_path: Path) -> list[list[str]]:
     return [_normalize_existing_row(row) for row in rows]
 
 
-def _requires_new_version_record(*, status: str, git_ref: str, existing_rows: list[list[str]]) -> bool:
-    """True when a successful event records a new git ref."""
-    if status != "success":
-        return False
-    latest_deploy_git_ref = _latest_successful_deploy_git_ref(existing_rows)
-    return not latest_deploy_git_ref or latest_deploy_git_ref != git_ref
+def _raise_missing_version_record(git_ref: str) -> None:
+    """Fail when deploy is missing a post-merge version row for a git ref."""
+    raise RuntimeError(
+        f"version_log.csv is missing a version row for git ref {git_ref}. "
+        "Run the post-merge version-log command before deploying this git ref."
+    )
 
 
-def require_changelog_for_pending_version_record(
+def require_version_record_for_deploy(
     *,
     repo_root: Path,
     settings: DeployLogSettings,
@@ -219,20 +218,17 @@ def require_changelog_for_pending_version_record(
     git_ref: str | None = None,
     version: str | None = None,
 ) -> None:
-    """Validate the merge-prepared version before writing deploy state."""
+    """Validate that deploy will reuse an existing version row."""
     if not settings.versioning_enabled or version is not None:
         return
     csv_path = _resolve_csv_path(repo_root=repo_root, csv_path=settings.csv_path)
     existing_rows = _read_existing_deploy_rows(csv_path)
     resolved_git_ref = git_ref if git_ref is not None else _get_git_ref(repo_root)
-    if not _requires_new_version_record(
-        status=status,
-        git_ref=resolved_git_ref,
-        existing_rows=existing_rows,
-    ):
+    if status != "success":
         return
-    resolved_version = _read_app_version(repo_root)
-    _require_changelog_entry_for_version(repo_root, resolved_version)
+    if _successful_deploy_version_for_git_ref(git_ref=resolved_git_ref, existing_rows=existing_rows):
+        return
+    _raise_missing_version_record(resolved_git_ref)
 
 
 def append_deploy_record(
@@ -299,12 +295,8 @@ def append_deploy_record_with_settings(
         )
         if existing_version:
             resolved_version = existing_version
-        elif _requires_new_version_record(
-            status=status,
-            git_ref=resolved_git_ref,
-            existing_rows=existing_rows,
-        ):
-            _require_changelog_entry_for_version(repo_root, resolved_version)
+        elif status == "success":
+            _raise_missing_version_record(resolved_git_ref)
 
     new_row = [
         timestamp,
@@ -335,7 +327,7 @@ def append_merge_record(
     local_branch: str | None = None,
     version: str | None = None,
 ) -> Path:
-    """Record a post-merge version row unless the git ref is already logged."""
+    """Bump APP_VERSION and record a post-merge row unless the git ref is already logged."""
     resolved_settings = settings if settings is not None else default_deploy_log_settings(repo_root)
     csv_path = _resolve_csv_path(repo_root=repo_root, csv_path=resolved_settings.csv_path)
     existing_rows = _read_existing_deploy_rows(csv_path)
@@ -343,11 +335,17 @@ def append_merge_record(
     if _successful_deploy_version_for_git_ref(git_ref=resolved_git_ref, existing_rows=existing_rows):
         return csv_path
 
-    resolved_version = version if version is not None else _read_app_version(repo_root)
+    current_version = _read_app_version(repo_root)
+    resolved_version = version if version is not None else current_version
+    should_persist_version = False
     if resolved_settings.versioning_enabled and version is None:
+        resolved_version = _increment_patch(current_version)
+        _require_changelog_entry_for_version(repo_root, resolved_version)
+        should_persist_version = True
+    elif resolved_settings.versioning_enabled:
         _require_changelog_entry_for_version(repo_root, resolved_version)
 
-    return append_deploy_record_with_settings(
+    written_path = append_deploy_record_with_settings(
         repo_root=repo_root,
         settings=resolved_settings,
         target=_MERGE_TARGET,
@@ -359,6 +357,9 @@ def append_merge_record(
         local_branch=local_branch,
         version=resolved_version,
     )
+    if should_persist_version:
+        _write_app_version(repo_root, resolved_version)
+    return written_path
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:

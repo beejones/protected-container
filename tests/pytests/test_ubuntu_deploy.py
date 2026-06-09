@@ -246,7 +246,7 @@ def test_swap_promotes_to_production_stack_and_stops_only_staging(tmp_path, monk
     assert deploy_record_settings[0].csv_path == Path("out/custom/version_log.csv")
 
 
-def test_main_requires_changelog_entry_before_remote_work(tmp_path, monkeypatch):
+def test_main_requires_post_merge_version_record_before_remote_work(tmp_path, monkeypatch):
     (tmp_path / "docker").mkdir()
     (tmp_path / "docker" / "docker-compose.yml").write_text("services: {}\n")
     (tmp_path / "docker" / "docker-compose.ubuntu.yml").write_text("services: {}\n")
@@ -303,7 +303,7 @@ def test_main_requires_changelog_entry_before_remote_work(tmp_path, monkeypatch)
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log._get_git_ref", lambda repo_root: "new-git-ref")
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.subprocess.run", fake_run)
 
-    with pytest.raises(RuntimeError, match="Run /changelog"):
+    with pytest.raises(RuntimeError, match="post-merge version-log command"):
         main([], repo_root_override=tmp_path)
 
     assert remote_calls == []

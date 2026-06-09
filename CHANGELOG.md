@@ -2,20 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.5] - 2026-06-09
+
+### New Capabilities
+
+- Made the post-merge version-log command the owner of the `.env` `APP_VERSION` bump after the merged git ref exists.
+- Updated the protected merge and changelog skills so `/changelog` prepares the target release entry but does not edit `.env` before merge.
+
+### Fixed Bugs
+
+- Fixed deploy/version workflow timing so successful deploys require a pre-existing version row for the git ref instead of creating the first version row during deploy.
+- Fixed direct deploys after merge so they must reuse the `target=merge` row written by `python scripts/deploy/deploy_log.py --record-merge`.
+
+### Touched Models
+
+- Version-log CSV versioning contract.
+- `DeployLogSettings` versioning behavior.
+
 ## [0.2.4] - 2026-06-09
 
 Pull Request: [#34](https://github.com/beejones/protected-container/pull/34)
 
 ### New Capabilities
 
-- Clarified the protected merge and changelog workflows so `/changelog` bumps `APP_VERSION` before main-bound merges.
+- Clarified the protected merge and changelog workflows so `/changelog` prepares version entries before main-bound merges.
 - Added post-merge version-log recording so the merged git ref is recorded before deploy.
 - Renamed the default deploy tracking CSV from `out/deploy/deploy_log.csv` to `out/deploy/version_log.csv`.
 - Updated deploy documentation to describe deploy logging as a verifier and recorder of prepared release versions.
 
 ### Fixed Bugs
 
-- Fixed deploy logging so new git refs record the already-prepared `APP_VERSION` instead of incrementing at deploy time.
+- Fixed deploy logging so new git refs use prepared version information instead of incrementing at deploy time.
 - Fixed repeated deploys of an already logged git ref so they reuse that git ref's recorded version even if local `.env` has advanced for a later release.
 - Fixed direct post-merge deploys so the merge record can seed the version for the same git ref before deployment starts.
 

@@ -58,7 +58,7 @@ Staging is the default target:
 source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py
 ```
 
-This deploys using `STAGING_*` overrides for domain, remote dir, and stack name. Containers are **created and then stopped via Portainer API**. All other settings (SSH host, compose files, hooks) are shared. If this is the first successful deploy record for the current git ref, the deploy log records the current `APP_VERSION` only after `CHANGELOG.md` already contains the matching version entry from `/changelog`; later staging, production, or swap deploys for the same git ref reuse that logged version.
+This deploys using `STAGING_*` overrides for domain, remote dir, and stack name. Containers are **created and then stopped via Portainer API**. All other settings (SSH host, compose files, hooks) are shared. Successful deploys require a version row for the current git ref; after merge, run the version-log command so deploys can reuse the recorded version.
 
 ## Deploy to Production
 
@@ -68,7 +68,7 @@ Pass `--prod` to target production:
 source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py --prod
 ```
 
-This updates and starts production containers, then stops any staging containers. If this is the first successful deploy record for the current git ref, the deploy log records the current `APP_VERSION` only after `/changelog` has prepared the matching `CHANGELOG.md` entry; repeated deploys of the same git ref reuse the logged version.
+This updates and starts production containers, then stops any staging containers. Successful deploys require a version row for the current git ref; repeated deploys of the same git ref reuse the logged version.
 
 ## Promote Staging to Production
 
@@ -84,7 +84,7 @@ This:
 3. Updates/starts the production Portainer stack
 4. Stops staging containers via Portainer API
 5. Keeps Caddy routing on `PUBLIC_DOMAIN` -> production stack
-6. Logs a `swap` event to the deploy CSV with the current `APP_VERSION`, requiring `/changelog` for new git refs and reusing the logged version for git refs already deployed
+6. Logs a `swap` event to the deploy CSV with the version already recorded for the current git ref
 
 Rollback uses a normal production deploy from the desired `git_ref` recorded in the deploy log.
 
@@ -104,7 +104,7 @@ Every deploy writes a row to `out/deploy/version_log.csv`. The latest record app
 | `image` | Container image deployed |
 | `status` | `success` / `failed` |
 
-`APP_VERSION` is recorded in the `version` column for every deploy. The first successful deploy record for a new git ref records the current `.env` version only when `CHANGELOG.md` already has a matching `## [x.y.z]` entry. Run `/changelog` before deploying a new git ref so `.env` and `CHANGELOG.md` are prepared together. Later staging, production, or swap records for the same git ref reuse the version already recorded for that git ref. Failed deploys never change `APP_VERSION`.
+`APP_VERSION` is recorded in the `version` column for every deploy. Successful deploys require an existing version row for the current git ref; they do not create the first version row. Later staging, production, or swap records for the same git ref reuse the version already recorded for that git ref. Failed deploys never change `APP_VERSION`.
 
 The merge workflow records the merged git ref first:
 
@@ -112,7 +112,7 @@ The merge workflow records the merged git ref first:
 source ../../../.venv/bin/activate && python scripts/deploy/deploy_log.py --record-merge
 ```
 
-That writes a `target=merge` row with the prepared `APP_VERSION`. A direct deploy of that same git ref then reuses the merge row's version.
+That increments `.env` `APP_VERSION` to the target already prepared in `CHANGELOG.md`, writes a `target=merge` row for the merged git ref, and lets a direct deploy of that same git ref reuse the merge row's version.
 
 **Rollback from CSV**: Find the latest `production` or `swap` + `success` row, use `git_ref` to checkout that commit, redeploy with `--prod`.
 

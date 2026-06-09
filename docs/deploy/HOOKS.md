@@ -129,12 +129,12 @@ For `ubuntu_deploy.py`, `deploy_result` includes:
 
 ### `configure_deploy_log(ctx, plan, settings)`
 - **Summary**: Before `ubuntu_deploy.py` writes `version_log.csv`.
-- **Use for**: Customizing where deploy tracking is written and whether deploy tracking enforces prepared `APP_VERSION` release entries.
+- **Use for**: Customizing where deploy tracking is written and whether deploy tracking enforces post-merge version rows.
 
 The `settings` object is mutable:
 
 - `settings.csv_path` (`Path`): CSV path to write. Relative paths are resolved from `ctx.repo_root`.
-- `settings.versioning_enabled` (`bool`, default `True`): when `False`, deploy rows still record the current `APP_VERSION`, but new git refs do not require a matching `CHANGELOG.md` entry. When enabled, the first successful deploy record for a new git ref records the current `APP_VERSION` only if `CHANGELOG.md` already has the matching version entry from `/changelog`; repeated records for the same git ref reuse the logged version.
+- `settings.versioning_enabled` (`bool`, default `True`): when `False`, deploy rows still record the current `APP_VERSION`, but deploys do not require a prior version row. When enabled, successful deploys require an existing version row for the git ref, normally created by `python scripts/deploy/deploy_log.py --record-merge`; repeated records for the same git ref reuse the logged version.
 
 ### `on_error(ctx, exc)`
 - **Summary**: If an exception occurs during the deployment lifecycle.

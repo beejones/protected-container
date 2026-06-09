@@ -95,9 +95,9 @@ git --no-pager log --oneline main..HEAD
 
 **Goal**: prepare the release-note artifacts that accompany a merge to `main`.
 
-1. Load and follow `.github/skills/changelog/SKILL.md` before creating or updating the PR for final review. For `_protected-container`, this step is mandatory for every merge to `main`; do not proceed to PR final review, readiness, or merge until protected `.env` `APP_VERSION` has been bumped and protected `CHANGELOG.md` contains the matching version entry required by the deploy version preflight.
+1. Load and follow `.github/skills/changelog/SKILL.md` before creating or updating the PR for final review. For `_protected-container`, this step is mandatory for every merge to `main`; do not proceed to PR final review, readiness, or merge until protected `CHANGELOG.md` contains the next version entry required by the post-merge version-log command.
 2. Use the PR report as the primary source. The changelog entry must summarize new capabilities and fixed bugs, mention touched models, and avoid changed-file details.
-3. Increment `APP_VERSION` in the root `.env` exactly once for the PR. Because `.env*` is ignored by default in this repo, do not force-add `.env`; treat the bump as local runtime configuration unless the repo has intentionally changed that tracking behavior.
+3. Derive the next `APP_VERSION` target from the root `.env`, but do not edit `.env` before merge. Because `.env*` is ignored by default in this repo, the actual bump must happen after merge through `python scripts/deploy/deploy_log.py --record-merge`, when the git ref has changed.
 4. Update root `CHANGELOG.md`; add it to the branch if this is the first tracked changelog entry.
 5. Update or regenerate the PR report if the version, changelog entry, or release-note status changed after the report was generated.
 6. If the version class, release-note summary, or touched models are unclear, pause and ask the user before continuing.
@@ -106,7 +106,7 @@ git --no-pager log --oneline main..HEAD
 
 **Goal**: create the PR, address review, prove CI and mergeability, then merge.
 
-1. Confirm the changelog/version step is complete or explicitly not applicable. If `CHANGELOG.md` changed, it must be included in the branch. If `.env` is ignored, verify `APP_VERSION` directly instead of expecting `git status` to show it.
+1. Confirm the changelog/version target step is complete or explicitly not applicable. If `CHANGELOG.md` changed, it must be included in the branch. If `.env` is ignored, verify the current `APP_VERSION` directly and confirm it is still the pre-merge baseline.
 
 2. Verify the working tree is clean:
 
@@ -176,7 +176,7 @@ source ../../../.venv/bin/activate && python scripts/deploy/deploy_log.py --reco
 git branch -D "$current_branch"
 ```
 
-The post-merge version-log command records the merged git ref with the prepared `APP_VERSION` in `out/deploy/version_log.csv`. If the next deploy uses the same git ref, deploy logging reuses that version instead of treating it as a new version event.
+The post-merge version-log command is mandatory. It increments `.env` `APP_VERSION` to the prepared changelog target only after `git pull` has moved `main` to the merged git ref, then records that ref in `out/deploy/version_log.csv`. If the next deploy uses the same git ref, deploy logging reuses that version instead of treating it as a new version event. If the command fails because `CHANGELOG.md` is missing the target version, fix the changelog and rerun the command before deploying.
 
 16. Remove the local PR report from `out/PR/` after merge unless the repo workflow explicitly keeps PR reports.
 
@@ -196,7 +196,7 @@ PR report preparation is complete when:
 Merge completion is done when:
 - The PR contains the report in its body or comments.
 - Review feedback is addressed or explicitly resolved.
-- `APP_VERSION` has been bumped for the main-bound merge, and root `CHANGELOG.md` has the matching entry.
+- `CHANGELOG.md` has the prepared target version before merge, and post-merge `APP_VERSION` has been bumped by the version-log command.
 - Required checks pass.
 - GitHub reports the PR is mergeable with no blocking state.
 - The PR is merged.
