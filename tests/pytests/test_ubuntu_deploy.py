@@ -17,6 +17,7 @@ from scripts.deploy.ubuntu_deploy import (
     collect_storage_manager_registrations,
     default_portainer_https_port,
     extract_stack_images,
+    ghcr_login_pull_remote_cmd,
     ghcr_images_from_stack,
     parse_boolish,
     prepare_stack_content_for_portainer,
@@ -98,6 +99,20 @@ def test_build_docker_build_and_push_cmds():
         "docker",
     ]
     assert push_cmd == ["docker", "push", "ghcr.io/beejones/protected-container:latest"]
+
+
+def test_ghcr_login_pull_remote_cmd_reports_digest_change():
+    out = ghcr_login_pull_remote_cmd(
+        image="ghcr.io/beejones/protected-container:latest",
+        username="builder",
+        token="secret-token",
+    )
+
+    assert "NEW_IMAGE_DOWNLOADED=" in out
+    assert "IMAGE_DIGEST_BEFORE=" in out
+    assert "IMAGE_DIGEST_AFTER=" in out
+    assert "docker image inspect" in out
+    assert "docker pull ghcr.io/beejones/protected-container:latest" in out
 
 
 def test_build_ssh_cmd_basic():

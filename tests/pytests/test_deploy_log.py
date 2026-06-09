@@ -236,6 +236,31 @@ class TestAppendDeployRecord:
         assert not get_csv_path(tmp_repo).exists()
         assert "APP_VERSION=1.2.3" in (tmp_repo / ".env").read_text()
 
+    def test_merge_record_without_changelog_enforcement_still_bumps_new_git_ref(self, tmp_repo: Path) -> None:
+        csv_path = tmp_repo / "out" / "deploy" / "version_log.csv"
+        csv_path.parent.mkdir(parents=True)
+        with csv_path.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(CSV_COLUMNS)
+            writer.writerow(["2026-05-18T00:00:00Z", "0" * 40, "main", "1.2.3", "swap", "prod-stack", "prod.example.com", "img", "success"])
+
+        settings = DeployLogSettings(csv_path=get_csv_path(tmp_repo), versioning_enabled=False)
+
+        csv_path = append_merge_record(
+            repo_root=tmp_repo,
+            settings=settings,
+            git_ref="1" * 40,
+            local_branch="release/deploy",
+        )
+
+        rows = list(csv.reader(csv_path.open()))
+        assert rows[1][1] == "1" * 40
+        assert rows[1][3] == "1.2.4"
+        assert rows[1][4] == "merge"
+        assert rows[2][1] == "0" * 40
+        assert rows[2][3] == "1.2.3"
+        assert "APP_VERSION=1.2.4" in (tmp_repo / ".env").read_text()
+
     def test_merge_record_requires_valid_current_app_version(self, tmp_repo: Path) -> None:
         (tmp_repo / ".env").write_text("APP_VERSION=not-semver\n")
 

@@ -51,7 +51,34 @@ jobs:
 
         image_digest() {
           # Returns the sha256 digest (no prefix) for a locally available image tag.
-          docker inspect --format='{{index .RepoDigests 0}}' "$1" 2>/dev/null | awk -F@ '{print $2}'
+          docker inspect --format='{{index .RepoDigests 0}}' "$1" 2>/dev/null | awk -F@ '{print $2}' || true
+        }
+
+        pull_with_digest_report() {
+          local image="$1"
+          local before_digest
+          before_digest=$(image_digest "$image")
+          if [ -z "$before_digest" ]; then
+            before_digest="<missing>"
+          fi
+
+          docker pull "$image" >/dev/null
+
+          local after_digest
+          after_digest=$(image_digest "$image")
+          if [ -z "$after_digest" ]; then
+            echo "::error::Unable to resolve digest for $image after pull"
+            exit 1
+          fi
+
+          echo "[pull] IMAGE_PULL_IMAGE=$image"
+          echo "[pull] IMAGE_DIGEST_BEFORE=$before_digest"
+          echo "[pull] IMAGE_DIGEST_AFTER=$after_digest"
+          if [ "$before_digest" != "$after_digest" ]; then
+            echo "[pull] NEW_IMAGE_DOWNLOADED=yes"
+          else
+            echo "[pull] NEW_IMAGE_DOWNLOADED=no"
+          fi
         }
 
         caddy_version_tag() {
@@ -95,7 +122,7 @@ jobs:
             echo "[mirror] version_tag=$version_tag"
           fi
 
-          docker pull "$upstream" >/dev/null
+          pull_with_digest_report "$upstream"
           local upstream_digest
           upstream_digest=$(image_digest "$upstream")
 
@@ -105,10 +132,12 @@ jobs:
           fi
 
           if [ -n "$mirror_digest" ] && [ "$upstream_digest" = "$mirror_digest" ]; then
+            echo "[mirror] MIRROR_UPDATE_REQUIRED=no"
             echo "[mirror] up-to-date ($upstream_digest)"
             return 0
           fi
 
+          echo "[mirror] MIRROR_UPDATE_REQUIRED=yes"
           echo "[mirror] updating latest: $mirror_digest -> $upstream_digest"
 
           # Always update :latest
@@ -201,35 +230,68 @@ jobs:
         CADDY_MIRROR: ghcr.io/${{ github.repository }}/caddy:2-alpine
         CODE_SERVER_MIRROR: ghcr.io/${{ github.repository }}/code-server:latest
       run: |
-        docker build -t $IMAGE ./docker
-        docker push $IMAGE
+        set -euo pipefail
+
+        image_digest() {
+          docker image inspect --format='{{index .RepoDigests 0}}' "$1" 2>/dev/null | awk -F@ '{print $2}' || true
+        }
+
+        pull_with_digest_report() {
+          local image="$1"
+          local before_digest
+          before_digest=$(image_digest "$image")
+          if [ -z "$before_digest" ]; then
+            before_digest="<missing>"
+          fi
+
+          docker pull "$image"
+
+          local after_digest
+          after_digest=$(image_digest "$image")
+          if [ -z "$after_digest" ]; then
+            echo "::error::Unable to resolve digest for $image after pull"
+            exit 1
+          fi
+
+          echo "IMAGE_PULL_IMAGE=$image"
+          echo "IMAGE_DIGEST_BEFORE=$before_digest"
+          echo "IMAGE_DIGEST_AFTER=$after_digest"
+          if [ "$before_digest" != "$after_digest" ]; then
+            echo "NEW_IMAGE_DOWNLOADED=yes"
+          else
+            echo "NEW_IMAGE_DOWNLOADED=no"
+          fi
+        }
+
+        docker build -t "$IMAGE" ./docker
+        docker push "$IMAGE"
         
         # Mirror Caddy to GHCR to avoid Docker Hub rate limits/ACE conflicts
-        docker pull caddy:2-alpine
-        docker tag caddy:2-alpine $CADDY_MIRROR
-        docker push $CADDY_MIRROR
+        pull_with_digest_report caddy:2-alpine
+        docker tag caddy:2-alpine "$CADDY_MIRROR"
+        docker push "$CADDY_MIRROR"
 
         caddy_vtag=$(docker run --rm --entrypoint caddy caddy:2-alpine version 2>/dev/null | awk '{print $1}' | head -n 1)
         caddy_vtag=${caddy_vtag#v}
         if [ -n "$caddy_vtag" ]; then
           CADDY_VERSION_MIRROR=ghcr.io/${{ github.repository }}/caddy:v${caddy_vtag}-alpine
-          docker tag caddy:2-alpine $CADDY_VERSION_MIRROR
-          docker push $CADDY_VERSION_MIRROR
+          docker tag caddy:2-alpine "$CADDY_VERSION_MIRROR"
+          docker push "$CADDY_VERSION_MIRROR"
         else
           echo "::warning::Could not detect Caddy version; skipping version tag"
         fi
 
         # Mirror code-server to GHCR to avoid Docker Hub rate limits/ACE conflicts
-        docker pull codercom/code-server:latest
-        docker tag codercom/code-server:latest $CODE_SERVER_MIRROR
-        docker push $CODE_SERVER_MIRROR
+        pull_with_digest_report codercom/code-server:latest
+        docker tag codercom/code-server:latest "$CODE_SERVER_MIRROR"
+        docker push "$CODE_SERVER_MIRROR"
 
         cs_version=$(docker run --rm --entrypoint code-server codercom/code-server:latest --version 2>/dev/null | head -n 1 | tr -d '\r')
         cs_vtag=$(echo "$cs_version" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)
         if [ -n "$cs_vtag" ]; then
           CODE_SERVER_VERSION_MIRROR=ghcr.io/${{ github.repository }}/code-server:v${cs_vtag}
-          docker tag codercom/code-server:latest $CODE_SERVER_VERSION_MIRROR
-          docker push $CODE_SERVER_VERSION_MIRROR
+          docker tag codercom/code-server:latest "$CODE_SERVER_VERSION_MIRROR"
+          docker push "$CODE_SERVER_VERSION_MIRROR"
         else
           echo "::warning::Could not detect code-server version; skipping version tag"
         fi

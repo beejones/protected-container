@@ -391,9 +391,21 @@ def portainer_ensure_running_remote_cmd(*, https_port: int) -> str:
 
 
 def ghcr_login_pull_remote_cmd(*, image: str, username: str, token: str) -> str:
+    quoted_image = shlex.quote(image)
     return (
-        f"printf %s {shlex.quote(token)} | docker login ghcr.io -u {shlex.quote(username)} --password-stdin >/dev/null "
-        f"&& docker pull {shlex.quote(image)} >/dev/null"
+        "set -e; "
+        f"image_ref={quoted_image}; "
+        "image_digest() { docker image inspect --format='{{index .RepoDigests 0}}' \"$1\" 2>/dev/null | awk -F@ '{print $2}' || true; }; "
+        "before_digest=$(image_digest \"$image_ref\"); "
+        "if [ -z \"$before_digest\" ]; then before_digest='<missing>'; fi; "
+        f"printf %s {shlex.quote(token)} | docker login ghcr.io -u {shlex.quote(username)} --password-stdin >/dev/null; "
+        f"docker pull {quoted_image} >/dev/null; "
+        "after_digest=$(image_digest \"$image_ref\"); "
+        "if [ -z \"$after_digest\" ]; then echo \"[ubuntu-deploy] IMAGE_DIGEST_AFTER=<missing>\" >&2; exit 1; fi; "
+        "echo \"[ubuntu-deploy] IMAGE_PULL_IMAGE=$image_ref\"; "
+        "echo \"[ubuntu-deploy] IMAGE_DIGEST_BEFORE=$before_digest\"; "
+        "echo \"[ubuntu-deploy] IMAGE_DIGEST_AFTER=$after_digest\"; "
+        "if [ \"$before_digest\" != \"$after_digest\" ]; then echo \"[ubuntu-deploy] NEW_IMAGE_DOWNLOADED=yes\"; else echo \"[ubuntu-deploy] NEW_IMAGE_DOWNLOADED=no\"; fi"
     )
 
 

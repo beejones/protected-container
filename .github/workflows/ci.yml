@@ -51,5 +51,39 @@ jobs:
         tags: ${{ env.IMAGE }}
     
     - name: Build Caddy image (check)
+      shell: bash
       run: |
-        docker pull caddy:2-alpine
+        set -euo pipefail
+
+        image_digest() {
+          docker image inspect --format='{{index .RepoDigests 0}}' "$1" 2>/dev/null | awk -F@ '{print $2}' || true
+        }
+
+        pull_with_digest_report() {
+          local image="$1"
+          local before_digest
+          before_digest=$(image_digest "$image")
+          if [ -z "$before_digest" ]; then
+            before_digest="<missing>"
+          fi
+
+          docker pull "$image"
+
+          local after_digest
+          after_digest=$(image_digest "$image")
+          if [ -z "$after_digest" ]; then
+            echo "::error::Unable to resolve digest for $image after pull"
+            exit 1
+          fi
+
+          echo "IMAGE_PULL_IMAGE=$image"
+          echo "IMAGE_DIGEST_BEFORE=$before_digest"
+          echo "IMAGE_DIGEST_AFTER=$after_digest"
+          if [ "$before_digest" != "$after_digest" ]; then
+            echo "NEW_IMAGE_DOWNLOADED=yes"
+          else
+            echo "NEW_IMAGE_DOWNLOADED=no"
+          fi
+        }
+
+        pull_with_digest_report caddy:2-alpine

@@ -336,13 +336,13 @@ def append_merge_record(
         return csv_path
 
     current_version = _read_app_version(repo_root)
-    resolved_version = version if version is not None else current_version
-    should_persist_version = False
-    if resolved_settings.versioning_enabled and version is None:
+    should_persist_version = version is None
+    if version is None:
         resolved_version = _increment_patch(current_version)
-        _require_changelog_entry_for_version(repo_root, resolved_version)
-        should_persist_version = True
-    elif resolved_settings.versioning_enabled:
+    else:
+        resolved_version = version
+
+    if resolved_settings.versioning_enabled:
         _require_changelog_entry_for_version(repo_root, resolved_version)
 
     written_path = append_deploy_record_with_settings(
