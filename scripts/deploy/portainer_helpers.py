@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+import time
 from typing import Literal
 
 import requests
@@ -343,6 +344,8 @@ def is_portainer_access_token_valid(
     https_port: int,
     insecure: bool,
     access_token: str,
+    retry_count: int = 6,
+    retry_delay_seconds: float = 5.0,
 ) -> bool:
     """Return whether the provided Portainer access token is currently valid.
 
@@ -357,18 +360,42 @@ def is_portainer_access_token_valid(
     hostname = extract_ssh_hostname(host).strip()
     base_url = f"https://{hostname}:{https_port}"
 
-    resp = requests.get(f"{base_url}/api/endpoints", headers=headers, verify=not insecure, timeout=20)
-    if int(resp.status_code) == 401:
-        return False
-    resp.raise_for_status()
+    attempts = max(1, int(retry_count))
+    transient_status_codes = {502, 503, 504}
+    last_transient_error = ""
 
-    payload = resp.json()
-    if not isinstance(payload, list):
-        error_text = _format_portainer_api_error(payload)
-        if error_text:
-            raise SystemExit(f"Portainer /api/endpoints returned an unexpected payload: {error_text}")
-        raise SystemExit("Unexpected Portainer /api/endpoints response format")
-    return True
+    for attempt_index in range(attempts):
+        try:
+            resp = requests.get(f"{base_url}/api/endpoints", headers=headers, verify=not insecure, timeout=20)
+        except requests.RequestException as exc:
+            last_transient_error = str(exc)
+            if attempt_index < attempts - 1:
+                time.sleep(retry_delay_seconds)
+                continue
+            raise SystemExit(f"Portainer API did not become ready after {attempts} attempt(s): {last_transient_error}")
+
+        status_code = int(resp.status_code)
+        if status_code == 401:
+            return False
+        if status_code in transient_status_codes:
+            details = str(getattr(resp, "text", "") or "").strip().replace("\n", " ")[:200]
+            last_transient_error = f"HTTP {status_code}" + (f": {details}" if details else "")
+            if attempt_index < attempts - 1:
+                time.sleep(retry_delay_seconds)
+                continue
+            raise SystemExit(f"Portainer API did not become ready after {attempts} attempt(s): {last_transient_error}")
+
+        resp.raise_for_status()
+
+        payload = resp.json()
+        if not isinstance(payload, list):
+            error_text = _format_portainer_api_error(payload)
+            if error_text:
+                raise SystemExit(f"Portainer /api/endpoints returned an unexpected payload: {error_text}")
+            raise SystemExit("Unexpected Portainer /api/endpoints response format")
+        return True
+
+    raise SystemExit(f"Portainer API did not become ready after {attempts} attempt(s): {last_transient_error}")
 
 
 def build_portainer_webhook_urls_from_token(*, host: str, https_port: int, webhook_token: str) -> list[str]:
@@ -439,20 +466,48 @@ def _extract_container_names(stack_content: str) -> list[str]:
             names.append(container_name)
     return names
 
+
 def portainer_ensure_running_remote_cmd(*, https_port: int) -> str:
     return (
+        "set -e; "
         "docker network inspect caddy >/dev/null 2>&1 || docker network create caddy >/dev/null; "
-        "if docker ps --format '{{.Names}}' | grep -Fxq portainer; then "
-        "echo '[ubuntu-deploy] Portainer already running'; "
-        "elif docker ps -a --format '{{.Names}}' | grep -Fxq portainer; then "
-        "echo '[ubuntu-deploy] Starting existing Portainer container'; "
-        "docker start portainer >/dev/null; "
-        "else "
-        "echo '[ubuntu-deploy] Creating Portainer container'; "
-        "docker volume create portainer_data >/dev/null && "
-        f"docker run -d --name portainer --restart=unless-stopped -p 8000:8000 -p {https_port}:9443 "
+        "docker volume create portainer_data >/dev/null; "
+        "docker pull portainer/portainer-ce:latest >/dev/null; "
+        "desired_image_id=$(docker image inspect --format '{{.Id}}' portainer/portainer-ce:latest); "
+        "portainer_on_caddy() { "
+        "docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' portainer 2>/dev/null | grep -Fxq caddy; "
+        "}; "
+        "portainer_has_host_ports() { "
+        "[ \"$(docker inspect --format '{{len .HostConfig.PortBindings}}' portainer 2>/dev/null || echo 0)\" != \"0\" ]; "
+        "}; "
+        "run_portainer() { "
+        "docker run -d --name portainer --restart=unless-stopped --network caddy "
         "-v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data "
         "portainer/portainer-ce:latest >/dev/null; "
+        "}; "
+        "if docker ps -a --format '{{.Names}}' | grep -Fxq portainer; then "
+        "existing_image_id=$(docker inspect --format '{{.Image}}' portainer 2>/dev/null || true); "
+        "if [ \"$existing_image_id\" != \"$desired_image_id\" ]; then "
+        "echo '[ubuntu-deploy] Updating Portainer to latest image'; "
+        "docker rm -f portainer >/dev/null; "
+        "run_portainer; "
+        "elif ! portainer_on_caddy; then "
+        "echo '[ubuntu-deploy] Recreating Portainer on caddy network'; "
+        "docker rm -f portainer >/dev/null; "
+        "run_portainer; "
+        "elif portainer_has_host_ports; then "
+        "echo '[ubuntu-deploy] Recreating Portainer without host port bindings'; "
+        "docker rm -f portainer >/dev/null; "
+        "run_portainer; "
+        "elif docker ps --format '{{.Names}}' | grep -Fxq portainer; then "
+        "echo '[ubuntu-deploy] Portainer already running with latest image'; "
+        "else "
+        "echo '[ubuntu-deploy] Starting existing Portainer container'; "
+        "docker start portainer >/dev/null; "
         "fi; "
-        "docker network connect caddy portainer >/dev/null 2>&1 || true"
+        "else "
+        "echo '[ubuntu-deploy] Creating Portainer container'; "
+        "run_portainer; "
+        "fi; "
+        "portainer_on_caddy"
     )

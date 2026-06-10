@@ -4,7 +4,7 @@
 
 - **Deploy history is observable**: Every successful deploy writes a row to a CSV log so operators can trace exactly what was deployed and when. The newest row appears directly below the header.
 - **Git commit is the rollback anchor**: The CSV records the **full 40-char commit SHA** (`git rev-parse HEAD`) so you can always `git checkout <sha>` to reproduce exactly what was deployed.
-- **Version lives in `.env` as `APP_VERSION`**: Format `x.y.z` (semver). `/changelog` bumps it for main-bound merges and writes the matching `CHANGELOG.md` entry. The deploy script reads that prepared version, logs it to the CSV for the first successful deploy record of a new git ref, and requires the matching changelog entry. Later staging, production, or swap records for the same git ref reuse the logged version.
+- **Version lives in `.env` as `APP_VERSION`**: Format `x.y.z` (semver). `/changelog` prepares the next main-bound changelog entry, and the post-merge version-log command can bump `.env` after merge. The deploy script records the current `APP_VERSION` for the first successful deploy record of a new git ref. Later staging, production, or swap records for the same git ref reuse the logged version.
 - **CSV columns and their purpose**:
   | Column | Value | Why |
   |--------|-------|-----|

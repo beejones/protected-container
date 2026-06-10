@@ -47,6 +47,37 @@ and reads the same environment variables:
 - `DEPLOY_HOOKS_MODULE`
 - `DEPLOY_HOOKS_SOFT_FAIL`
 
+## Ubuntu Upstream Container Contract
+
+Hooks for Ubuntu deployments should customize the application stack, not the shared platform control plane. The deploy script owns the central Caddy proxy, the external `caddy` Docker network, and the `portainer` admin container. Portainer is expected to be reachable through Caddy at `https://portainer.<base-domain>` on HTTPS port `443`; hooks should not assume direct host access to Portainer on `9000` or `9443`.
+
+For web-facing upstream containers, hook customizations must preserve the shared ingress contract:
+
+- Attach the web service to the external `caddy` network.
+- Use a unique `container_name` or stack/container naming scheme so Caddy can resolve the upstream target deterministically.
+- Keep the public route behind the central Caddy `basic_auth` block unless the deploy docs explicitly define a different edge-auth policy.
+- Do not publish public host ports for normal web traffic; expose only the internal container port that Caddy will reverse proxy to.
+
+### Portainer Auth For Ubuntu Hooks
+
+Portainer uses its own API authentication behind the Caddy TLS route. This is separate from the Caddy Basic Auth guard used for application routes.
+
+If a hook or deploy flow needs Portainer API operations, create an access token in the Portainer UI and store the token value in `.env.deploy.secrets`:
+
+```env
+PORTAINER_ACCESS_TOKEN=<portainer-api-token>
+```
+
+The deploy helpers send this value as Portainer's `X-API-Key` header over `https://portainer.<base-domain>`. Store only the token value, not a `Bearer ...` prefix, and never log it from hook code.
+
+Webhook-only deployments may also use a stack webhook token:
+
+```env
+PORTAINER_WEBHOOK_TOKEN=<token-tail-only>
+```
+
+Prefer `PORTAINER_ACCESS_TOKEN` when hooks or staging/swap flows need to resolve endpoints, find stacks, create or repair webhooks, stop staging containers, or verify Portainer before triggering the stack. `PORTAINER_WEBHOOK_TOKEN` is enough only when the correct stack webhook already exists and no Portainer API lookup is needed.
+
 ## Implementing Hooks
 
 Create a Python module that exports a `get_hooks()` function returning an object (class instance or simple object) that implements any of the methods defined in the protocol. You only need to implement the hooks you care about.
@@ -134,7 +165,7 @@ For `ubuntu_deploy.py`, `deploy_result` includes:
 The `settings` object is mutable:
 
 - `settings.csv_path` (`Path`): CSV path to write. Relative paths are resolved from `ctx.repo_root`.
-- `settings.versioning_enabled` (`bool`, default `True`): when `False`, deploy rows still record the current `APP_VERSION`, but deploys do not require a prior version row. Merge records still bump `APP_VERSION` for a new git ref, but skip the changelog-entry check. When enabled, successful deploys require an existing version row for the git ref, normally created by `python scripts/deploy/deploy_log.py --record-merge`; repeated records for the same git ref reuse the logged version.
+- `settings.versioning_enabled` (`bool`, default `True`): when `False`, deploy rows still record the current `APP_VERSION`. Merge records still bump `APP_VERSION` for a new git ref, but skip the changelog-entry check. When enabled, repeated records for the same git ref reuse the logged version; deploys for a new git ref use the current `APP_VERSION`.
 
 ### `on_error(ctx, exc)`
 - **Summary**: If an exception occurs during the deployment lifecycle.

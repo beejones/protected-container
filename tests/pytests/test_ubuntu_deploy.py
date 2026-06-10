@@ -17,6 +17,7 @@ from scripts.deploy.ubuntu_deploy import (
     collect_storage_manager_registrations,
     default_portainer_https_port,
     extract_stack_images,
+    find_unsupported_edge_auth_deploy_keys,
     ghcr_login_pull_remote_cmd,
     ghcr_images_from_stack,
     parse_boolish,
@@ -28,6 +29,7 @@ from scripts.deploy.ubuntu_deploy import (
     rewrite_rendered_paths_for_remote,
     rewrite_staging_container_names_for_portainer,
     stack_has_service,
+    validate_no_unsupported_edge_auth_deploy_keys,
     main,
     read_deploy_key,
     read_deploy_secret_key,
@@ -123,6 +125,32 @@ def test_build_ssh_cmd_basic():
 def test_build_ssh_connectivity_cmd_basic():
     cmd = build_ssh_connectivity_cmd(host="user@host")
     assert cmd == ["ssh", "user@host", "echo SSH_OK"]
+
+
+def test_find_unsupported_edge_auth_deploy_keys_reports_authentik_leftovers(tmp_path: Path):
+    (tmp_path / ".env.deploy").write_text(
+        "\n".join(
+            [
+                "PUBLIC_DOMAIN=protected-container.example.com",
+                "EDGE_AUTH_MODE=oidc",
+                "AUTH_POLICY=protected-container-users",
+                "AUTHENTIK_PUBLIC_DOMAIN=auth.example.com",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    out = find_unsupported_edge_auth_deploy_keys(repo_root=tmp_path)
+
+    assert out == ["AUTHENTIK_PUBLIC_DOMAIN", "AUTH_POLICY", "EDGE_AUTH_MODE"]
+
+
+def test_validate_no_unsupported_edge_auth_deploy_keys_fails_before_remote_work(tmp_path: Path):
+    (tmp_path / ".env.deploy").write_text("EDGE_AUTH_MODE=oidc\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="Remove unsupported Authentik/OIDC edge-auth key"):
+        validate_no_unsupported_edge_auth_deploy_keys(repo_root=tmp_path)
 
 
 def test_should_fallback_to_remote_compose_on_portainer_init_timeout():
@@ -264,6 +292,76 @@ def test_swap_promotes_to_production_stack_and_stops_only_staging(tmp_path, monk
     assert deploy_record_settings[0].csv_path == Path("out/custom/version_log.csv")
 
 
+def test_main_allows_new_git_ref_before_remote_work(tmp_path, monkeypatch):
+    (tmp_path / "docker").mkdir()
+    (tmp_path / "docker" / "docker-compose.yml").write_text("services: {}\n")
+    (tmp_path / "docker" / "docker-compose.ubuntu.yml").write_text("services: {}\n")
+    (tmp_path / ".env").write_text("APP_VERSION=1.2.4\n")
+    (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## [1.2.3] - 2026-06-09\n")
+    (tmp_path / ".env.deploy").write_text(
+        "\n".join(
+            [
+                "UBUNTU_SSH_HOST=deploy@example.com",
+                "UBUNTU_BUILD_PUSH=false",
+                "PUBLIC_DOMAIN=protected-container.zenia.eu",
+                "APP_IMAGE=example/app:staged",
+                "PORTAINER_STACK_NAME=protected-container",
+                "PORTAINER_ENDPOINT_ID=1",
+            ]
+        )
+        + "\n"
+    )
+    (tmp_path / ".env.deploy.secrets").write_text("PORTAINER_ACCESS_TOKEN=token-123\n")
+
+    for key in [
+        "UBUNTU_SSH_HOST",
+        "UBUNTU_BUILD_PUSH",
+        "PUBLIC_DOMAIN",
+        "APP_IMAGE",
+        "PORTAINER_STACK_NAME",
+        "PORTAINER_ENDPOINT_ID",
+        "PORTAINER_ACCESS_TOKEN",
+        "PORTAINER_WEBHOOK_URL",
+        "PORTAINER_WEBHOOK_TOKEN",
+        "UBUNTU_COMPOSE_FILES",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+
+    class DummyHooks:
+        def call(self, hook_name, *args, **kwargs):
+            return None
+
+    remote_calls: list[list[str]] = []
+
+    def fake_run(cmd, *args, **kwargs):
+        remote_calls.append(cmd)
+
+        class DummyResult:
+            returncode = 0
+            stdout = "hostname 192.168.1.241\n"
+            stderr = ""
+
+        return DummyResult()
+
+    def fake_render_compose_stack_content(*, repo_root, compose_files):
+        return "services:\n  app:\n    image: example/app:staged\n"
+
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_hooks.load_hooks", lambda **kwargs: DummyHooks())
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.render_compose_stack_content", fake_render_compose_stack_content)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log._get_git_ref", lambda repo_root: "new-git-ref")
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.subprocess.run", fake_run)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy._run", lambda *args, **kwargs: None)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.is_portainer_access_token_valid", lambda **kwargs: True)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.resolve_portainer_webhook_url_via_api", lambda **kwargs: "")
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.ensure_caddy_registration", lambda **kwargs: None)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.is_domain_registered", lambda **kwargs: True)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log.append_deploy_record_with_settings", lambda **kwargs: tmp_path / "version_log.csv")
+
+    main(["--prod", "--skip-build-push"], repo_root_override=tmp_path)
+
+    assert ["ssh", "deploy@example.com", "echo SSH_OK"] in remote_calls
+
+
 def test_deploy_version_preflight_does_not_require_existing_record(tmp_path):
     (tmp_path / ".env").write_text("APP_VERSION=1.2.4\n")
     settings = deploy_log.default_deploy_log_settings(tmp_path)
@@ -332,12 +430,105 @@ def test_resolve_network_host_from_ssh_target_falls_back_to_plain_hostname(monke
 def test_portainer_ensure_running_remote_cmd_contains_expected_steps():
     out = portainer_ensure_running_remote_cmd(https_port=9943)
     assert "docker network inspect caddy" in out
+    assert "docker pull portainer/portainer-ce:latest" in out
+    assert "docker image inspect --format '{{.Id}}' portainer/portainer-ce:latest" in out
+    assert "portainer_on_caddy()" in out
+    assert "portainer_has_host_ports()" in out
     assert "docker ps --format '{{.Names}}'" in out
     assert "docker ps -a --format '{{.Names}}'" in out
     assert "docker start portainer" in out
+    assert "docker rm -f portainer" in out
     assert "docker run -d --name portainer" in out
-    assert "docker network connect caddy portainer" in out
-    assert "-p 9943:9443" in out
+    assert "--network caddy" in out
+    assert "Recreating Portainer on caddy network" in out
+    assert "Recreating Portainer without host port bindings" in out
+    assert "docker network connect caddy portainer" not in out
+    assert "-p 9943:9443" not in out
+    assert "-p 8000:8000" not in out
+
+
+def test_proxy_deploy_script_force_recreates_caddy_to_flush_synced_caddyfile():
+    repo_root = Path(__file__).resolve().parents[2]
+    script_text = (repo_root / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh").read_text(encoding="utf-8")
+
+    assert "up -d --force-recreate --remove-orphans" in script_text
+    assert "caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile" in script_text
+
+
+def test_main_refreshes_central_proxy_even_when_container_exists(tmp_path, monkeypatch):
+    (tmp_path / "docker").mkdir()
+    (tmp_path / "docker" / "docker-compose.yml").write_text("services: {}\n")
+    (tmp_path / "docker" / "docker-compose.ubuntu.yml").write_text("services: {}\n")
+    proxy_script = tmp_path / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh"
+    proxy_script.parent.mkdir(parents=True)
+    proxy_script.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("APP_VERSION=1.2.3\n")
+    (tmp_path / ".env.deploy").write_text(
+        "\n".join(
+            [
+                "UBUNTU_SSH_HOST=deploy@example.com",
+                "UBUNTU_REMOTE_DIR=/srv/prod",
+                "UBUNTU_BUILD_PUSH=false",
+                "PUBLIC_DOMAIN=protected-container.zenia.eu",
+                "APP_IMAGE=example/app:latest",
+                "PORTAINER_STACK_NAME=protected-container",
+                "PORTAINER_ENDPOINT_ID=1",
+            ]
+        )
+        + "\n"
+    )
+    (tmp_path / ".env.deploy.secrets").write_text("PORTAINER_ACCESS_TOKEN=token-123\n")
+
+    for key in [
+        "UBUNTU_SSH_HOST",
+        "UBUNTU_REMOTE_DIR",
+        "UBUNTU_BUILD_PUSH",
+        "PUBLIC_DOMAIN",
+        "APP_IMAGE",
+        "PORTAINER_STACK_NAME",
+        "PORTAINER_ENDPOINT_ID",
+        "PORTAINER_ACCESS_TOKEN",
+        "PORTAINER_WEBHOOK_URL",
+        "PORTAINER_WEBHOOK_TOKEN",
+        "UBUNTU_COMPOSE_FILES",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+
+    class DummyHooks:
+        def call(self, hook_name, *args, **kwargs):
+            if hook_name == "configure_deploy_log":
+                settings = args[2]
+                settings.versioning_enabled = False
+            return None
+
+    class DummyResult:
+        returncode = 0
+        stdout = "hostname 192.168.1.241\n"
+        stderr = ""
+
+    subprocess_calls: list[list[str]] = []
+
+    def fake_run(cmd, *args, **kwargs):
+        subprocess_calls.append(cmd)
+        return DummyResult()
+
+    def fake_render_compose_stack_content(*, repo_root, compose_files):
+        return "services:\n  app:\n    image: example/app:latest\n"
+
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_hooks.load_hooks", lambda **kwargs: DummyHooks())
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.subprocess.run", fake_run)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy._run", lambda *args, **kwargs: None)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.render_compose_stack_content", fake_render_compose_stack_content)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.is_portainer_access_token_valid", lambda **kwargs: True)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.resolve_portainer_webhook_url_via_api", lambda **kwargs: "")
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.ensure_caddy_registration", lambda **kwargs: None)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.is_domain_registered", lambda **kwargs: True)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log.append_deploy_record_with_settings", lambda **kwargs: tmp_path / "version_log.csv")
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log._read_app_version", lambda repo_root: "1.2.3")
+
+    main(["--prod", "--skip-build-push"], repo_root_override=tmp_path)
+
+    assert ["bash", str(proxy_script)] in subprocess_calls
 
 
 def test_extract_ssh_hostname_with_and_without_user():
@@ -420,6 +611,51 @@ def test_is_portainer_access_token_valid_false_on_401(monkeypatch):
         )
         is False
     )
+
+
+def test_is_portainer_access_token_valid_retries_transient_bad_gateway(monkeypatch):
+    class BadGatewayResponse:
+        status_code = 502
+        text = "Bad Gateway"
+
+        def raise_for_status(self):
+            raise RuntimeError("should not raise before retrying")
+
+        def json(self):
+            return {}
+
+    class OkResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [{"Id": 1, "Name": "local"}]
+
+    calls: list[str] = []
+
+    def fake_get(url, headers, verify, timeout):
+        calls.append(url)
+        if len(calls) == 1:
+            return BadGatewayResponse()
+        return OkResponse()
+
+    monkeypatch.setattr("scripts.deploy.portainer_helpers.requests.get", fake_get)
+    monkeypatch.setattr("scripts.deploy.portainer_helpers.time.sleep", lambda seconds: None)
+
+    assert (
+        is_portainer_access_token_valid(
+            host="ronny@192.168.1.45",
+            https_port=9943,
+            insecure=True,
+            access_token="token-123",
+            retry_count=2,
+            retry_delay_seconds=0,
+        )
+        is True
+    )
+    assert len(calls) == 2
 
 
 def test_is_portainer_access_token_valid_surfaces_portainer_message(monkeypatch):

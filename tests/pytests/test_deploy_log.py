@@ -181,6 +181,7 @@ class TestAppendDeployRecord:
         )
 
         rows = list(csv.reader(csv_path.open()))
+        assert rows[1][1] == "d" * 40
         assert rows[1][3] == "1.2.3"
 
     def test_production_success_reuses_post_merge_version_record(self, tmp_repo: Path) -> None:
@@ -360,6 +361,9 @@ class TestAppendDeployRecord:
         assert rows[1][3] == "1.2.4"
         content = (tmp_repo / ".env").read_text()
         assert "APP_VERSION=1.2.4" in content
+        rows = list(csv.reader(csv_path.open()))
+        assert rows[1][1] == "1" * 40
+        assert rows[1][3] == "1.2.4"
 
     def test_swap_success_for_new_git_ref_records_current_version(self, tmp_repo: Path) -> None:
         _write_app_version(tmp_repo, "1.2.4")
@@ -386,6 +390,9 @@ class TestAppendDeployRecord:
         assert rows[1][3] == "1.2.4"
         content = (tmp_repo / ".env").read_text()
         assert "APP_VERSION=1.2.4" in content
+        rows = list(csv.reader(csv_path.open()))
+        assert rows[1][1] == "1" * 40
+        assert rows[1][3] == "1.2.4"
 
     def test_same_git_ref_reuses_existing_deploy_version_even_if_env_changed(self, tmp_repo: Path) -> None:
         _write_app_version(tmp_repo, "1.2.4")

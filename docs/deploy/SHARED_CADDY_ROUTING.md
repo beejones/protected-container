@@ -15,9 +15,31 @@ Registration is **fully automated** by the `ubuntu_deploy.py` script.  All you n
 
 1. Prepare your project's `docker-compose.yml` (network + container name).
 2. Set the right env vars in `.env.deploy`.
-3. Run `ubuntu_deploy.py` — the Caddyfile is updated and Caddy reloaded for you.
+3. Run `ubuntu_deploy.py` — the proxy Caddyfile is synced, `central-proxy` is recreated so stale routes are dropped, and app routes are registered for you.
 
 The generated site block includes the centralized proxy `basic_auth` guard using the existing `BASIC_AUTH_USER` and `BASIC_AUTH_HASH` placeholders. App-specific auth such as session login or API keys remains separate defense-in-depth behind that Caddy boundary.
+
+## Portainer Through Caddy
+
+Portainer is part of the shared Ubuntu control plane and is routed through the same central Caddy proxy. Use `https://portainer.<base-domain>` for the Portainer UI, API, and stack webhooks. Do not expose or target direct host ports `9000` or `9443` for normal deployments.
+
+`ubuntu_deploy.py` derives the Portainer host from `PUBLIC_DOMAIN`. For example, `PUBLIC_DOMAIN=myapp.example.com` resolves Portainer API calls to `https://portainer.example.com` on port `443`. Keep `PORTAINER_HTTPS_PORT=443` unless you have intentionally changed the Caddy HTTPS listener.
+
+Portainer API auth is Portainer-native, not Caddy Basic Auth. Create an access token in the Portainer UI and place the token value in `.env.deploy.secrets`:
+
+```env
+PORTAINER_ACCESS_TOKEN=<portainer-api-token>
+```
+
+The deploy helpers send that token as Portainer's `X-API-Key` header over the Caddy TLS route. Use this token when deploy automation needs to resolve endpoints, find stacks, create or repair webhooks, stop staging containers, or run swap flows.
+
+If you already have a stack webhook and do not need API lookup, store only the webhook token tail in `.env.deploy.secrets`:
+
+```env
+PORTAINER_WEBHOOK_TOKEN=<token-tail-only>
+```
+
+The corresponding webhook URL should still point at the Caddy route, for example `https://portainer.example.com/api/stacks/webhooks/<token>`.
 
 ## Step-by-step
 
@@ -71,11 +93,13 @@ python scripts/deploy/ubuntu_deploy.py
 
 The deploy script automatically:
 
-1. Reads the proxy Caddyfile on the remote host via SSH.
-2. Checks whether a site block for `PUBLIC_DOMAIN` already exists (idempotent).
-3. If missing, appends a protected site block with `basic_auth` plus `reverse_proxy <service>:<port>`.
-4. If an existing domain block is present but unprotected, rewrites it with the standard `basic_auth` guard.
-4. Restarts the `central-proxy` container and validates the config.
+1. Syncs the repo-owned proxy files to the remote host.
+2. Recreates `central-proxy` so Caddy mounts the latest Caddyfile and drops stale routes from earlier experiments.
+3. Reads the proxy Caddyfile on the remote host via SSH.
+4. Checks whether a site block for `PUBLIC_DOMAIN` already exists (idempotent).
+5. If missing, appends a protected site block with `basic_auth` plus `reverse_proxy <service>:<port>`.
+6. If an existing domain block is present but unprotected, rewrites it with the standard `basic_auth` guard.
+7. Restarts the `central-proxy` container and validates the config after route changes.
 
 No manual SSH or Caddyfile editing required.
 

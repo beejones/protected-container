@@ -63,6 +63,46 @@ ENV_STAGING_PUBLIC_DOMAIN = "STAGING_PUBLIC_DOMAIN"
 ENV_STAGING_REMOTE_DIR = "STAGING_REMOTE_DIR"
 ENV_STAGING_PORTAINER_STACK_NAME = "STAGING_PORTAINER_STACK_NAME"
 
+UNSUPPORTED_EDGE_AUTH_DEPLOY_KEYS: frozenset[str] = frozenset(
+    {
+        "EDGE_AUTH_MODE",
+        "EDGE_AUTH_GATEWAY",
+        "EDGE_AUTH_GATEWAY_SERVICE",
+        "EDGE_AUTH_GATEWAY_PORT",
+        "EDGE_AUTH_VERIFY_URI",
+        "EDGE_AUTH_COPY_HEADERS",
+        "EDGE_AUTH_TOKEN_HEADER",
+        "EDGE_AUTH_DEFAULT_PROOF_LEVEL",
+        "EDGE_AUTH_TOKEN_ISSUER",
+        "AUTH_POLICY",
+        "AUTH_PROOF_LEVEL",
+        "AUTH_AUDIENCE",
+        "AUTH_APPROVER_EMAIL",
+        "AUTH_SECRET_REF",
+        "AUTHENTIK_PUBLIC_DOMAIN",
+        "AUTHENTIK_IMAGE",
+        "AUTHENTIK_TAG",
+        "AUTHENTIK_OUTPOST_SERVICE",
+        "AUTHENTIK_POSTGRESQL__HOST",
+        "AUTHENTIK_POSTGRESQL__PORT",
+        "AUTHENTIK_POSTGRESQL__NAME",
+        "AUTHENTIK_POSTGRESQL__USER",
+        "AUTHENTIK_STORAGE__BACKEND",
+        "AUTHENTIK_BACKUP_DIR",
+        "AUTHENTIK_EMAIL__HOST",
+        "AUTHENTIK_EMAIL__PORT",
+        "AUTHENTIK_EMAIL__USERNAME",
+        "AUTHENTIK_EMAIL__FROM",
+        "AUTHENTIK_EMAIL__USE_TLS",
+        "AUTHENTIK_EMAIL__USE_SSL",
+        "AUTHENTIK_BOOTSTRAP_EMAIL",
+        "AUTHENTIK_GOOGLE_CLIENT_ID",
+        "AUTHENTIK_MICROSOFT_CLIENT_ID",
+        "AUTHENTIK_FACEBOOK_CLIENT_ID",
+        "AUTHENTIK_SIGNING_KEY_REF",
+    }
+)
+
 
 _STORAGE_MANAGER_LABEL_PATTERN = re.compile(r"^storage-manager\.(\d+)\.(.+)$")
 
@@ -118,6 +158,33 @@ def build_ssh_cmd(*, host: str, remote_command: str) -> list[str]:
 
 def build_ssh_connectivity_cmd(*, host: str) -> list[str]:
     return build_ssh_cmd(host=host, remote_command="echo SSH_OK")
+
+
+def find_unsupported_edge_auth_deploy_keys(*, repo_root: Path) -> list[str]:
+    deploy_env_path = repo_root / ".env.deploy"
+    if not deploy_env_path.exists():
+        return []
+
+    deploy_values = dotenv_values(deploy_env_path)
+    return sorted(
+        key
+        for key in UNSUPPORTED_EDGE_AUTH_DEPLOY_KEYS
+        if str(deploy_values.get(key) or "").strip()
+    )
+
+
+def validate_no_unsupported_edge_auth_deploy_keys(*, repo_root: Path) -> None:
+    unsupported_keys = find_unsupported_edge_auth_deploy_keys(repo_root=repo_root)
+    if not unsupported_keys:
+        return
+
+    key_label = "key" if len(unsupported_keys) == 1 else "keys"
+    raise SystemExit(
+        "Remove unsupported Authentik/OIDC edge-auth "
+        f"{key_label} from .env.deploy before running Ubuntu deploy: "
+        + ", ".join(unsupported_keys)
+        + ". This branch currently supports the stock Caddy Basic Auth proxy path only."
+    )
 
 
 def resolve_network_host_from_ssh_target(host: str) -> str:
@@ -374,20 +441,7 @@ def stack_has_service(*, stack_content: str, service_name: str) -> bool:
 
 
 def portainer_ensure_running_remote_cmd(*, https_port: int) -> str:
-    return (
-        "if docker ps --format '{{.Names}}' | grep -Fxq portainer; then "
-        "echo '[ubuntu-deploy] Portainer already running'; "
-        "elif docker ps -a --format '{{.Names}}' | grep -Fxq portainer; then "
-        "echo '[ubuntu-deploy] Starting existing Portainer container'; "
-        "docker start portainer >/dev/null; "
-        "else "
-        "echo '[ubuntu-deploy] Creating Portainer container'; "
-        "docker volume create portainer_data >/dev/null && "
-        f"docker run -d --name portainer --restart=unless-stopped -p 8000:8000 -p {https_port}:9443 "
-        "-v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data "
-        "portainer/portainer-ce:latest >/dev/null; "
-        "fi"
-    )
+    return portainer_helpers.portainer_ensure_running_remote_cmd(https_port=https_port)
 
 
 def ghcr_login_pull_remote_cmd(*, image: str, username: str, token: str) -> str:
@@ -765,6 +819,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     )
     hook_ctx = deploy_hooks.DeployContext(repo_root=repo_root, env=os.environ, args=args)
     hooks.call("pre_validate_env", hook_ctx)
+    validate_no_unsupported_edge_auth_deploy_keys(repo_root=repo_root)
 
     resolved_host = str(args.host or "").strip()
     if not resolved_host:
@@ -1031,11 +1086,6 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     hooks.call("configure_deploy_log", hook_ctx, hook_plan, deploy_log_settings)
     if not deploy_log_settings.versioning_enabled:
         log_info("Deploy log versioning disabled by deploy hook.", icon="🪝")
-    deploy_log.require_version_record_for_deploy(
-        repo_root=repo_root,
-        settings=deploy_log_settings,
-        status="success",
-    )
 
     log_step(f"Prepared deployment plan [{deploy_target.upper()}]", icon="🧭")
     log_info(f"Target environment: {deploy_target}")
@@ -1128,29 +1178,19 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                 action=f"Failed remote GHCR login/pull for image {image}",
             )
 
-    log_step("Ensuring Central Caddy Proxy is running", icon="🌐")
-    # Check if the global proxy container exists
-    caddy_check_cmd = build_ssh_cmd(
-        host=resolved_host,
-        remote_command="docker ps -a --format '{{.Names}}' | grep -Fxq central-proxy"
-    )
-    result = subprocess.run(caddy_check_cmd, check=False, capture_output=True, text=True)
-    if result.returncode != 0:
-        log_info("Central proxy missing. Deploying via ubuntu_deploy_proxy.sh...")
-        proxy_script = repo_root / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh"
-        if proxy_script.exists():
-            try:
-                subprocess.run(["bash", str(proxy_script)], check=True)
-            except subprocess.CalledProcessError as exc:
-                detail = _subprocess_error_text(exc)
-                message = "Failed to deploy central proxy via ubuntu_deploy_proxy.sh"
-                if detail:
-                    message = f"{message}: {detail}"
-                raise SystemExit(message)
-        else:
-            log_info(f"Warning: {proxy_script} not found. Cannot auto-deploy proxy.", icon="⚠️")
+    log_step("Refreshing Central Caddy Proxy", icon="🌐")
+    proxy_script = repo_root / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh"
+    if proxy_script.exists():
+        try:
+            subprocess.run(["bash", str(proxy_script)], check=True)
+        except subprocess.CalledProcessError as exc:
+            detail = _subprocess_error_text(exc)
+            message = "Failed to refresh central proxy via ubuntu_deploy_proxy.sh"
+            if detail:
+                message = f"{message}: {detail}"
+            raise SystemExit(message)
     else:
-        log_info("Central proxy is already running.")
+        log_info(f"Warning: {proxy_script} not found. Cannot auto-refresh proxy.", icon="⚠️")
 
     used_remote_compose_fallback = False
 
