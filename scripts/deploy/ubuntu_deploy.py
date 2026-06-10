@@ -33,6 +33,10 @@ import caddy_register
 import deploy_hooks
 import deploy_log
 import portainer_helpers
+try:
+    from scripts.deploy.env_schema import VarsEnum
+except ImportError:
+    from env_schema import VarsEnum
 
 
 ENV_PUBLIC_DOMAIN = "PUBLIC_DOMAIN"
@@ -450,6 +454,65 @@ def read_deploy_key(*, repo_root: Path, key: str) -> str:
 
 def read_deploy_secret_key(*, repo_root: Path, key: str) -> str:
     return read_dotenv_key(dotenv_path=repo_root / ".env.deploy.secrets", key=key)
+
+
+def read_deploy_env_value(*, repo_root: Path, key: str, default: str = "") -> str:
+    value = str(os.getenv(key) or "").strip()
+    if value:
+        return value
+    value = read_deploy_key(repo_root=repo_root, key=key)
+    return value or default
+
+
+def resolve_caddy_edge_auth_registration(*, repo_root: Path) -> caddy_register.EdgeAuthRegistration:
+    copy_header_value = read_deploy_env_value(
+        repo_root=repo_root,
+        key=VarsEnum.EDGE_AUTH_COPY_HEADERS.value,
+        default=",".join(caddy_register.DEFAULT_AUTHENTIK_COPY_HEADERS),
+    )
+    gateway_service = read_deploy_env_value(
+        repo_root=repo_root,
+        key=VarsEnum.EDGE_AUTH_GATEWAY_SERVICE.value,
+        default="",
+    )
+    if not gateway_service:
+        gateway_service = read_deploy_env_value(
+            repo_root=repo_root,
+            key=VarsEnum.AUTHENTIK_OUTPOST_SERVICE.value,
+            default=caddy_register.DEFAULT_EDGE_AUTH_GATEWAY_SERVICE,
+        )
+
+    return caddy_register.EdgeAuthRegistration(
+        mode=read_deploy_env_value(
+            repo_root=repo_root,
+            key=VarsEnum.EDGE_AUTH_MODE.value,
+            default=caddy_register.AUTH_MODE_BASIC,
+        ),
+        gateway_service=gateway_service,
+        gateway_port=read_deploy_env_value(
+            repo_root=repo_root,
+            key=VarsEnum.EDGE_AUTH_GATEWAY_PORT.value,
+            default=caddy_register.DEFAULT_EDGE_AUTH_GATEWAY_PORT,
+        ),
+        verify_uri=read_deploy_env_value(
+            repo_root=repo_root,
+            key=VarsEnum.EDGE_AUTH_VERIFY_URI.value,
+            default=caddy_register.DEFAULT_EDGE_AUTH_VERIFY_URI,
+        ),
+        copy_headers=caddy_register.parse_copy_headers(copy_header_value),
+        auth_policy=read_deploy_env_value(
+            repo_root=repo_root,
+            key=VarsEnum.AUTH_POLICY.value,
+            default=caddy_register.DEFAULT_AUTH_POLICY,
+        ),
+        auth_proof_level=read_deploy_env_value(
+            repo_root=repo_root,
+            key=VarsEnum.AUTH_PROOF_LEVEL.value,
+            default=caddy_register.DEFAULT_AUTH_PROOF_LEVEL,
+        ),
+        auth_audience=read_deploy_env_value(repo_root=repo_root, key=VarsEnum.AUTH_AUDIENCE.value),
+        auth_secret_ref=read_deploy_env_value(repo_root=repo_root, key=VarsEnum.AUTH_SECRET_REF.value),
+    ).normalized()
 
 
 def read_raw_dotenv_assignment_value(*, dotenv_path: Path, key: str) -> str:
@@ -1380,6 +1443,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         # Override with CADDY_PROXY_DIR when downstream layout differs.
         proxy_repo_dir = Path(resolved_caddy_proxy_dir) if resolved_caddy_proxy_dir else (remote_dir.parent / "protected-container")
         caddyfile_path = str(proxy_repo_dir / "docker" / "proxy" / "Caddyfile")
+        edge_auth_registration = resolve_caddy_edge_auth_registration(repo_root=repo_root)
 
         log_step("Registering with centralized Caddy proxy", icon="🔒")
         try:
@@ -1389,12 +1453,14 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                 service=service_name,
                 port=resolved_web_port,
                 caddyfile_path=caddyfile_path,
+                edge_auth=edge_auth_registration,
             )
 
             is_registered = caddy_register.is_domain_registered(
                 ssh_host=resolved_host,
                 domain=resolved_public_domain,
                 caddyfile_path=caddyfile_path,
+                edge_auth=edge_auth_registration,
             )
             if is_registered:
                 log_info(

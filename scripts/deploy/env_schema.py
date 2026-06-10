@@ -102,6 +102,8 @@ class VarsEnum(str, Enum):
     AUTH_PROOF_LEVEL = "AUTH_PROOF_LEVEL"
     AUTH_SECRET_REF = "AUTH_SECRET_REF"
     AUTHENTIK_PUBLIC_DOMAIN = "AUTHENTIK_PUBLIC_DOMAIN"
+    AUTHENTIK_IMAGE = "AUTHENTIK_IMAGE"
+    AUTHENTIK_TAG = "AUTHENTIK_TAG"
     AUTHENTIK_OUTPOST_SERVICE = "AUTHENTIK_OUTPOST_SERVICE"
     AUTHENTIK_POSTGRESQL__HOST = "AUTHENTIK_POSTGRESQL__HOST"
     AUTHENTIK_POSTGRESQL__PORT = "AUTHENTIK_POSTGRESQL__PORT"
@@ -434,7 +436,7 @@ DEPLOY_SCHEMA: tuple[EnvKeySpec, ...] = (
     EnvKeySpec(
         key=VarsEnum.EDGE_AUTH_GATEWAY_SERVICE,
         mandatory=False,
-        default="authentik-outpost",
+        default="authentik-server",
         targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
     ),
     EnvKeySpec(
@@ -452,7 +454,7 @@ DEPLOY_SCHEMA: tuple[EnvKeySpec, ...] = (
     EnvKeySpec(
         key=VarsEnum.EDGE_AUTH_COPY_HEADERS,
         mandatory=False,
-        default="X-authentik-username>X-Auth-User,X-authentik-email>X-Auth-Email,X-authentik-groups>X-Auth-Groups,X-Authentik-Jwt>X-Auth-Token",
+        default="X-Authentik-Username>X-Auth-User,X-Authentik-Email>X-Auth-Email,X-Authentik-Groups>X-Auth-Groups,X-Authentik-Jwt>X-Auth-Token",
         targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
     ),
     EnvKeySpec(
@@ -510,9 +512,21 @@ DEPLOY_SCHEMA: tuple[EnvKeySpec, ...] = (
         targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
     ),
     EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_IMAGE,
+        mandatory=False,
+        default="ghcr.io/goauthentik/server",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_TAG,
+        mandatory=False,
+        default="2026.5.2",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
         key=VarsEnum.AUTHENTIK_OUTPOST_SERVICE,
         mandatory=False,
-        default="authentik-outpost",
+        default="authentik-server",
         targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
     ),
     EnvKeySpec(

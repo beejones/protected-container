@@ -22,6 +22,7 @@ from scripts.deploy.ubuntu_deploy import (
     parse_boolish,
     prepare_stack_content_for_portainer,
     register_storage_manager_registrations,
+    resolve_caddy_edge_auth_registration,
     resolve_portainer_api_host,
     resolve_deploy_target,
     resolve_network_host_from_ssh_target,
@@ -620,6 +621,43 @@ def test_read_deploy_key_reads_remote_dir(tmp_path: Path):
     (repo_root / ".env.deploy").write_text("UBUNTU_REMOTE_DIR=/home/ronny/containers/protected-container\n", encoding="utf-8")
     out = read_deploy_key(repo_root=repo_root, key="UBUNTU_REMOTE_DIR")
     assert out == "/home/ronny/containers/protected-container"
+
+
+def test_resolve_caddy_edge_auth_registration_uses_basic_defaults(tmp_path: Path):
+    edge_auth = resolve_caddy_edge_auth_registration(repo_root=tmp_path)
+
+    assert edge_auth.mode == "basic"
+    assert edge_auth.gateway_service == "authentik-server"
+    assert edge_auth.gateway_port == "9000"
+    assert edge_auth.verify_uri == "/outpost.goauthentik.io/auth/caddy"
+    assert edge_auth.auth_policy == "protected-container-users"
+
+
+def test_resolve_caddy_edge_auth_registration_reads_oidc_deploy_values(tmp_path: Path):
+    repo_root = tmp_path
+    (repo_root / ".env.deploy").write_text(
+        "EDGE_AUTH_MODE=oidc\n"
+        "EDGE_AUTH_GATEWAY_SERVICE=authentik-custom\n"
+        "EDGE_AUTH_GATEWAY_PORT=9100\n"
+        "EDGE_AUTH_VERIFY_URI=/outpost.goauthentik.io/auth/caddy\n"
+        "EDGE_AUTH_COPY_HEADERS=X-Authentik-Email>X-Auth-Email,X-Authentik-Jwt>X-Auth-Token\n"
+        "AUTH_POLICY=approved-users\n"
+        "AUTH_PROOF_LEVEL=signed_token\n"
+        "AUTH_AUDIENCE=example-app\n"
+        "AUTH_SECRET_REF=authentik/example-app/hmac\n",
+        encoding="utf-8",
+    )
+
+    edge_auth = resolve_caddy_edge_auth_registration(repo_root=repo_root)
+
+    assert edge_auth.mode == "oidc"
+    assert edge_auth.gateway_service == "authentik-custom"
+    assert edge_auth.gateway_port == "9100"
+    assert edge_auth.copy_headers == ("X-Authentik-Email>X-Auth-Email", "X-Authentik-Jwt>X-Auth-Token")
+    assert edge_auth.auth_policy == "approved-users"
+    assert edge_auth.auth_proof_level == "signed_token"
+    assert edge_auth.auth_audience == "example-app"
+    assert edge_auth.auth_secret_ref == "authentik/example-app/hmac"
 
 
 def test_read_dotenv_key_missing_file_returns_empty(tmp_path: Path):

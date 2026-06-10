@@ -110,8 +110,10 @@ def test_oidc_edge_auth_defaults_keep_basic_auth_rollback_valid() -> None:
 
     assert kv[VarsEnum.EDGE_AUTH_MODE.value] == "basic"
     assert kv[VarsEnum.EDGE_AUTH_GATEWAY.value] == "authentik"
-    assert kv[VarsEnum.EDGE_AUTH_GATEWAY_SERVICE.value] == "authentik-outpost"
+    assert kv[VarsEnum.EDGE_AUTH_GATEWAY_SERVICE.value] == "authentik-server"
     assert kv[VarsEnum.EDGE_AUTH_VERIFY_URI.value] == "/outpost.goauthentik.io/auth/caddy"
+    assert kv[VarsEnum.AUTHENTIK_IMAGE.value] == "ghcr.io/goauthentik/server"
+    assert kv[VarsEnum.AUTHENTIK_TAG.value] == "2026.5.2"
     validate_cross_field_rules(deploy_kv=kv, context="deploy")
 
 

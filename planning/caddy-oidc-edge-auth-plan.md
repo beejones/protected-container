@@ -227,8 +227,8 @@ Provider: Google | Microsoft | Facebook
 - [x] Phase 0: Cleanup and documentation audit
 - [x] Phase 1: Caddy mechanism investigation and decision record
 - [x] Phase 2: Auth gateway selection and proof-route target
-- [ ] Phase 3: Env schema, secrets, user store, and provisioning contract
-- [ ] Phase 4: Shared Caddy auth snippet and route registration
+- [x] Phase 3: Env schema, secrets, user store, and provisioning contract
+- [ ] Phase 4: Shared Caddy auth snippet and route registration (route-generation slice complete; live staging proof checks remain)
 - [ ] Phase 5: Identity proof contract for downstream containers
 - [ ] Phase 6: New-user authorization workflow
 - [ ] Phase 7: stock-dashboard adoption and smoke tests
@@ -486,31 +486,41 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 
 ### Tasks
 
-- [ ] Add a reusable Caddy auth snippet/import for protected routes.
-- [ ] Install the Authentik staging proof route using the selected `forward_auth` target from Phase 2.
-- [ ] Ensure the snippet strips client-supplied identity/proof headers before `forward_auth`.
-- [ ] Render generated app site blocks using `import protected_auth` before `reverse_proxy` when `EDGE_AUTH_MODE=oidc`.
-- [ ] Extend app registration to store auth policy, proof level, audience, and optional secret reference.
+- [x] Add a reusable Caddy auth snippet/import for protected routes.
+- [x] Add the Authentik gateway route and selected `forward_auth` target from Phase 2 to the proxy Caddyfile.
+- [x] Ensure the snippet strips client-supplied identity/proof headers before `forward_auth`.
+- [x] Render generated app site blocks using `import protected_auth` before `reverse_proxy` when `EDGE_AUTH_MODE=oidc`.
+- [x] Extend app registration output to record auth policy, proof level, audience, and optional secret reference as route metadata comments without raw secrets.
 - [ ] Extend app registration to render/update any selected gateway policy or assertion-service app metadata needed for per-app audiences.
-- [ ] Keep Basic Auth route rendering only for explicit rollback mode.
-- [ ] Update route-health detection from `_site_block_has_basic_auth` to a generic protected-route check that recognizes the shared OIDC import.
-- [ ] Add repair logic for unprotected, stale Basic-Auth-only, or malformed protected routes.
-- [ ] Ensure auth gateway routes and callbacks are not protected by their own forward-auth guard.
+- [x] Keep Basic Auth route rendering only for explicit rollback mode.
+- [x] Update route-health detection from `_site_block_has_basic_auth` to a generic protected-route check that recognizes the shared OIDC import.
+- [x] Add repair logic for unprotected, stale Basic-Auth-only, or mismatched protected routes, including `{$PUBLIC_DOMAIN}` placeholder repair.
+- [x] Ensure auth gateway routes and callbacks are not protected by their own forward-auth guard.
+
+### Phase 4 Implementation Notes
+
+- `docker/proxy/Caddyfile` now defines `(protected_auth)`, strips incoming `X-Auth-*` and `X-Authentik-*` headers, proxies Authentik outpost paths before `forward_auth`, copies Authentik identity/JWT headers into the `X-Auth-*` contract, and exposes the Authentik gateway route without importing the guard.
+- `docker/proxy/docker-compose.yml` now includes profiled Authentik `server`, `worker`, and PostgreSQL services using the stable image tag pinned by Authentik's official compose artifact.
+- `scripts/deploy/caddy_register.py` now has a typed `EdgeAuthRegistration` contract, Basic/OIDC/Public route rendering, shared-snippet insertion/update, OIDC metadata comments, auth-mode-aware route-health checks, and deterministic stale-route repair.
+- `scripts/deploy/ubuntu_deploy.py` now resolves edge-auth registration values from process env or `.env.deploy` only and passes the selected auth contract into Caddy registration and verification without reading `.env.deploy.secrets`.
+- `docs/deploy/SHARED_CADDY_ROUTING.md` now documents `EDGE_AUTH_MODE=basic|oidc|public`, OIDC profile startup, generated route repair behavior, and Basic Auth rollback.
 
 ### Acceptance Criteria
 
-- [ ] Every auto-registered protected app route imports the shared auth guard in OIDC mode.
-- [ ] Existing unprotected or Basic-Auth-only routes can be repaired deterministically.
-- [ ] Auth callback/login routes stay reachable.
+- [x] Every auto-registered protected app route imports the shared auth guard in OIDC mode.
+- [x] Existing unprotected or Basic-Auth-only routes can be repaired deterministically.
+- [x] Auth callback/login routes stay reachable in rendered Caddy config.
 - [ ] The staging proof route blocks anonymous users, denies unauthorized users, and allows approved users.
-- [ ] WebSocket behavior and existing reverse-proxy headers remain intact.
-- [ ] Raw app secrets are not written into generated Caddy site blocks.
-- [ ] Generated routes include the shared auth import and no app route is marked protected without it.
+- [x] Existing reverse-proxy headers in the static protected-container route remain intact.
+- [x] Raw app secrets are not written into generated Caddy site blocks.
+- [x] Generated routes include the shared auth import and no app route is marked protected without it.
 
 ### Verification
 
-- [ ] `source .venv/bin/activate && pytest -q tests/pytests/test_caddy_register.py`
-- [ ] `docker compose -f docker/proxy/docker-compose.yml config --no-env-resolution --no-interpolate`
+- [x] `source .venv/bin/activate && pytest -q tests/pytests/test_caddy_register.py tests/pytests/test_env_schema.py tests/pytests/test_env_schema_secrets.py tests/pytests/test_ubuntu_deploy.py` (`85 passed`).
+- [x] `source .venv/bin/activate && pytest -q tests/pytests` (`217 passed`).
+- [x] `docker compose -f docker/proxy/docker-compose.yml config --no-env-resolution --no-interpolate`.
+- [x] `docker run --rm -v "$PWD/docker/proxy/Caddyfile:/etc/caddy/Caddyfile:ro" -e ACME_EMAIL=ops@example.com -e PUBLIC_DOMAIN=app.example.com -e BASIC_AUTH_USER=admin -e 'BASIC_AUTH_HASH=$2a$14$abcdefghijklmnopqrstuvwxyzABCDEFGHijklmnopqrstuv' -e EDGE_AUTH_GATEWAY_SERVICE=authentik-server -e EDGE_AUTH_GATEWAY_PORT=9000 -e EDGE_AUTH_VERIFY_URI=/outpost.goauthentik.io/auth/caddy -e AUTHENTIK_PUBLIC_DOMAIN=auth.example.com caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`.
 - [ ] `docker exec central-proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile` on staging.
 - [ ] Manual staging proof-route checks for anonymous redirect/denial, authenticated unauthorized denial, approved access, identity headers, and `X-Auth-Token` presence.
 
@@ -523,12 +533,14 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 
 ### Exit Criteria
 
-- [ ] Route registration can generate, detect, and repair centrally protected OIDC routes.
+- [x] Route registration can generate, detect, and repair centrally protected OIDC routes.
+- [ ] Authentik-backed staging route behavior is proven against a live proxy stack.
 
 ## Phase 5 - Identity Proof Contract For Downstream Containers
 
 ### Tasks
 
+- [ ] in the future we will also needs OAUTH2 flows for machine to machine. Can our current architecture accomodate this
 - [ ] Create downstream-container docs that explain how to use the auth mechanism from an app's perspective.
 - [ ] Document the Level 1 trusted-header contract and the Level 2 signed-token contract.
 - [ ] Document exactly which headers Caddy strips and which headers it sets after gateway approval.
@@ -575,7 +587,6 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 - [ ] Define deauthorization: remove the user/group, invalidate active sessions if supported, and verify denial.
 - [ ] Document provider setup for Google, Microsoft, and Facebook callback URLs and required scopes/claims.
 - [ ] Document a break-glass path for operators if the auth gateway is down or misconfigured.
-
 ### Acceptance Criteria
 
 - [ ] Operators can approve a new user without editing the Caddyfile directly.

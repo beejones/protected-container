@@ -17,6 +17,99 @@ services:
     networks:
       - caddy
 
+  authentik-postgresql:
+    image: docker.io/library/postgres:16-alpine
+    profiles:
+      - oidc
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${AUTHENTIK_POSTGRESQL__NAME:-authentik}
+      POSTGRES_USER: ${AUTHENTIK_POSTGRESQL__USER:-authentik}
+      POSTGRES_PASSWORD: ${AUTHENTIK_POSTGRESQL__PASSWORD:-}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      start_period: 20s
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - authentik_postgresql:/var/lib/postgresql/data
+    networks:
+      - caddy
+
+  authentik-server:
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2026.5.2}
+    command: server
+    profiles:
+      - oidc
+    restart: unless-stopped
+    env_file:
+      - ../../.env.deploy
+      - ../../.env.deploy.secrets
+    environment:
+      AUTHENTIK_POSTGRESQL__HOST: ${AUTHENTIK_POSTGRESQL__HOST:-authentik-postgresql}
+      AUTHENTIK_POSTGRESQL__PORT: ${AUTHENTIK_POSTGRESQL__PORT:-5432}
+      AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_POSTGRESQL__NAME:-authentik}
+      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_POSTGRESQL__USER:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRESQL__PASSWORD:-}
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-}
+      AUTHENTIK_BOOTSTRAP_PASSWORD_HASH: ${AUTHENTIK_BOOTSTRAP_PASSWORD_HASH:-}
+      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:-}
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:-}
+      AUTHENTIK_EMAIL__HOST: ${AUTHENTIK_EMAIL__HOST:-}
+      AUTHENTIK_EMAIL__PORT: ${AUTHENTIK_EMAIL__PORT:-587}
+      AUTHENTIK_EMAIL__USERNAME: ${AUTHENTIK_EMAIL__USERNAME:-}
+      AUTHENTIK_EMAIL__PASSWORD: ${AUTHENTIK_EMAIL__PASSWORD:-}
+      AUTHENTIK_EMAIL__FROM: ${AUTHENTIK_EMAIL__FROM:-}
+      AUTHENTIK_EMAIL__USE_TLS: ${AUTHENTIK_EMAIL__USE_TLS:-true}
+      AUTHENTIK_EMAIL__USE_SSL: ${AUTHENTIK_EMAIL__USE_SSL:-false}
+    depends_on:
+      authentik-postgresql:
+        condition: service_healthy
+    volumes:
+      - authentik_data:/data
+      - authentik_templates:/templates
+    expose:
+      - "9000"
+      - "9443"
+    networks:
+      - caddy
+
+  authentik-worker:
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2026.5.2}
+    command: worker
+    profiles:
+      - oidc
+    restart: unless-stopped
+    env_file:
+      - ../../.env.deploy
+      - ../../.env.deploy.secrets
+    environment:
+      AUTHENTIK_POSTGRESQL__HOST: ${AUTHENTIK_POSTGRESQL__HOST:-authentik-postgresql}
+      AUTHENTIK_POSTGRESQL__PORT: ${AUTHENTIK_POSTGRESQL__PORT:-5432}
+      AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_POSTGRESQL__NAME:-authentik}
+      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_POSTGRESQL__USER:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRESQL__PASSWORD:-}
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-}
+      AUTHENTIK_BOOTSTRAP_PASSWORD_HASH: ${AUTHENTIK_BOOTSTRAP_PASSWORD_HASH:-}
+      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:-}
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:-}
+      AUTHENTIK_EMAIL__HOST: ${AUTHENTIK_EMAIL__HOST:-}
+      AUTHENTIK_EMAIL__PORT: ${AUTHENTIK_EMAIL__PORT:-587}
+      AUTHENTIK_EMAIL__USERNAME: ${AUTHENTIK_EMAIL__USERNAME:-}
+      AUTHENTIK_EMAIL__PASSWORD: ${AUTHENTIK_EMAIL__PASSWORD:-}
+      AUTHENTIK_EMAIL__FROM: ${AUTHENTIK_EMAIL__FROM:-}
+      AUTHENTIK_EMAIL__USE_TLS: ${AUTHENTIK_EMAIL__USE_TLS:-true}
+      AUTHENTIK_EMAIL__USE_SSL: ${AUTHENTIK_EMAIL__USE_SSL:-false}
+    depends_on:
+      authentik-postgresql:
+        condition: service_healthy
+    volumes:
+      - authentik_data:/data
+      - authentik_templates:/templates
+    networks:
+      - caddy
+
 networks:
   caddy:
     external: true
@@ -25,3 +118,6 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
+  authentik_postgresql:
+  authentik_data:
+  authentik_templates:

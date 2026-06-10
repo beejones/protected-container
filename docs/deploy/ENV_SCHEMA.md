@@ -65,7 +65,7 @@ The selected gateway for the first OIDC rollout is Authentik. The deploy schema 
 - `EDGE_AUTH_GATEWAY`, `EDGE_AUTH_GATEWAY_SERVICE`, `EDGE_AUTH_GATEWAY_PORT`, `EDGE_AUTH_VERIFY_URI`
 - `EDGE_AUTH_COPY_HEADERS`, `EDGE_AUTH_TOKEN_HEADER`, `EDGE_AUTH_DEFAULT_PROOF_LEVEL`, `EDGE_AUTH_TOKEN_ISSUER`
 - `AUTH_APPROVER_EMAIL`, `AUTH_AUDIENCE`, `AUTH_POLICY`, `AUTH_PROOF_LEVEL`, `AUTH_SECRET_REF`
-- `AUTHENTIK_PUBLIC_DOMAIN`, `AUTHENTIK_OUTPOST_SERVICE`, `AUTHENTIK_POSTGRESQL__HOST`, `AUTHENTIK_POSTGRESQL__PORT`, `AUTHENTIK_POSTGRESQL__NAME`, `AUTHENTIK_POSTGRESQL__USER`
+- `AUTHENTIK_PUBLIC_DOMAIN`, `AUTHENTIK_IMAGE`, `AUTHENTIK_TAG`, `AUTHENTIK_OUTPOST_SERVICE`, `AUTHENTIK_POSTGRESQL__HOST`, `AUTHENTIK_POSTGRESQL__PORT`, `AUTHENTIK_POSTGRESQL__NAME`, `AUTHENTIK_POSTGRESQL__USER`
 - `AUTHENTIK_STORAGE__BACKEND`, `AUTHENTIK_BACKUP_DIR`, `AUTHENTIK_BOOTSTRAP_EMAIL`
 - `AUTHENTIK_EMAIL__HOST`, `AUTHENTIK_EMAIL__PORT`, `AUTHENTIK_EMAIL__USERNAME`, `AUTHENTIK_EMAIL__FROM`, `AUTHENTIK_EMAIL__USE_TLS`, `AUTHENTIK_EMAIL__USE_SSL`
 - `AUTHENTIK_GOOGLE_CLIENT_ID`, `AUTHENTIK_MICROSOFT_CLIENT_ID`, `AUTHENTIK_FACEBOOK_CLIENT_ID`, `AUTHENTIK_SIGNING_KEY_REF`
@@ -83,6 +83,8 @@ The deploy schema classifies these Authentik values as deploy-time secrets in `.
 - `AUTHENTIK_FACEBOOK_CLIENT_SECRET`
 
 When `EDGE_AUTH_MODE=oidc`, validation requires `AUTHENTIK_PUBLIC_DOMAIN`, `AUTHENTIK_SECRET_KEY`, and `AUTHENTIK_POSTGRESQL__PASSWORD`. `AUTH_APPROVER_EMAIL` defaults operationally to `ACME_EMAIL` when it is not set. Provider client IDs and client secrets must be configured as pairs so examples and CI do not drift into half-configured social login.
+
+The first proxy-stack rollout uses Authentik's embedded proxy outpost on the Authentik server container. Keep `EDGE_AUTH_GATEWAY_SERVICE` and `AUTHENTIK_OUTPOST_SERVICE` aligned with that Compose service name, which defaults to `authentik-server`. `AUTHENTIK_IMAGE` and `AUTHENTIK_TAG` are non-secret deploy vars so operators can pin and review the Authentik image before production rollout; the default tag follows the stable version pinned by Authentik's official Docker Compose artifact.
 
 Use `AUTHENTIK_BOOTSTRAP_PASSWORD_HASH` instead of a plaintext bootstrap password. Authentik's automated-install docs state that plaintext bootstrap passwords are supported but discouraged, while `AUTHENTIK_BOOTSTRAP_PASSWORD_HASH` stores only the local password verifier. Wrap generated hashes in single quotes in dotenv files so `$` characters are not interpolated.
 

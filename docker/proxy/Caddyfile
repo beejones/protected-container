@@ -1,41 +1,69 @@
 # Centralized Caddyfile for TLS termination and Routing
 # 
 # Requires an external network `caddy` to route to services by their container name.
-
 {
-    email {$ACME_EMAIL:?required}
+	email {$ACME_EMAIL:?required}
 }
+
+(protected_auth) {
+	request_header -X-Auth-*
+	request_header -X-Authentik-*
+
+	reverse_proxy /outpost.goauthentik.io/* {$EDGE_AUTH_GATEWAY_SERVICE:authentik-server}:{$EDGE_AUTH_GATEWAY_PORT:9000}
+
+	forward_auth {$EDGE_AUTH_GATEWAY_SERVICE:authentik-server}:{$EDGE_AUTH_GATEWAY_PORT:9000} {
+		uri {$EDGE_AUTH_VERIFY_URI:/outpost.goauthentik.io/auth/caddy}
+		copy_headers {
+			X-Authentik-Username>X-Auth-User
+			X-Authentik-Email>X-Auth-Email
+			X-Authentik-Groups>X-Auth-Groups
+			X-Authentik-Jwt>X-Auth-Token
+		}
+		trusted_proxies private_ranges
+	}
+}
+
+# -------------------------
+# Authentik Gateway Route
+# -------------------------
+{$AUTHENTIK_PUBLIC_DOMAIN:auth.localhost} {
+	tls {$ACME_EMAIL}
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+
+	reverse_proxy authentik-server:9000
+}
+
 # -------------------------
 # Protected Container Route
 # -------------------------
 {$PUBLIC_DOMAIN} {
-    tls {$ACME_EMAIL}
-    header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+	tls {$ACME_EMAIL}
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 
-    basic_auth /* {
-        {$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
-    }
+	basic_auth /* {
+		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+	}
 
-    reverse_proxy protected-container:8080 {
-        header_up Upgrade {http.request.header.Upgrade}
-        header_up Connection {http.request.header.Connection}
-    }
+	reverse_proxy protected-container:8080 {
+		header_up Upgrade {http.request.header.Upgrade}
+		header_up Connection {http.request.header.Connection}
+	}
 }
 
 # -------------------------
 # Portainer Admin Route
 # -------------------------
 portainer.zenia.eu {
-    tls {$ACME_EMAIL}
-    header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-    
-    # Route to the admin portal of portainer over the secure local HTTP network
-    reverse_proxy portainer:9000
+	tls {$ACME_EMAIL}
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+
+	# Route to the admin portal of portainer over the secure local HTTP network
+	reverse_proxy portainer:9000
 }
 
 # -------------------------
 # Default Healthcheck Block
 # -------------------------
 :80 {
-    respond /healthz "OK" 200
+	respond /healthz "OK" 200
 }
