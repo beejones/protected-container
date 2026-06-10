@@ -503,6 +503,7 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 - `docker/proxy/docker-compose.yml` now includes profiled Authentik `server`, `worker`, and PostgreSQL services using the stable image tag pinned by Authentik's official compose artifact.
 - `scripts/deploy/caddy_register.py` now has a typed `EdgeAuthRegistration` contract, Basic/OIDC/Public route rendering, shared-snippet insertion/update, OIDC metadata comments, auth-mode-aware route-health checks, and deterministic stale-route repair.
 - `scripts/deploy/ubuntu_deploy.py` now resolves edge-auth registration values from process env or `.env.deploy` only and passes the selected auth contract into Caddy registration and verification without reading `.env.deploy.secrets`.
+- `scripts/deploy/ubuntu_deploy.py` now derives the registration upstream port from the rendered Compose app service when `WEB_PORT` is unset, so the default code-server container registers against `8080` instead of the legacy `3000` fallback.
 - `docs/deploy/SHARED_CADDY_ROUTING.md` now documents `EDGE_AUTH_MODE=basic|oidc|public`, OIDC profile startup, generated route repair behavior, and Basic Auth rollback.
 
 ### Acceptance Criteria
@@ -517,8 +518,9 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 
 ### Verification
 
-- [x] `source .venv/bin/activate && pytest -q tests/pytests/test_caddy_register.py tests/pytests/test_env_schema.py tests/pytests/test_env_schema_secrets.py tests/pytests/test_ubuntu_deploy.py` (`85 passed`).
-- [x] `source .venv/bin/activate && pytest -q tests/pytests` (`217 passed`).
+- [x] `source .venv/bin/activate && python -m pytest -q tests/pytests/test_ubuntu_deploy.py tests/pytests/test_caddy_register.py tests/pytests/test_env_schema.py tests/pytests/test_env_schema_secrets.py` (`86 passed`).
+- [x] `source .venv/bin/activate && python -m pytest tests/pytests/test_ubuntu_deploy.py::test_prod_registration_uses_compose_exposed_app_port_when_web_port_unset -x -v` proved code-server registration uses the Compose `8080` port when `WEB_PORT` is unset.
+- [x] `source .venv/bin/activate && python -m pytest -q tests/pytests` (`218 passed`).
 - [x] `docker compose -f docker/proxy/docker-compose.yml config --no-env-resolution --no-interpolate`.
 - [x] `docker run --rm -v "$PWD/docker/proxy/Caddyfile:/etc/caddy/Caddyfile:ro" -e ACME_EMAIL=ops@example.com -e PUBLIC_DOMAIN=app.example.com -e BASIC_AUTH_USER=admin -e 'BASIC_AUTH_HASH=$2a$14$abcdefghijklmnopqrstuvwxyzABCDEFGHijklmnopqrstuv' -e EDGE_AUTH_GATEWAY_SERVICE=authentik-server -e EDGE_AUTH_GATEWAY_PORT=9000 -e EDGE_AUTH_VERIFY_URI=/outpost.goauthentik.io/auth/caddy -e AUTHENTIK_PUBLIC_DOMAIN=auth.example.com caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`.
 - [ ] `docker exec central-proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile` on staging.

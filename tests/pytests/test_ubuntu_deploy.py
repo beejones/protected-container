@@ -264,6 +264,91 @@ def test_swap_promotes_to_production_stack_and_stops_only_staging(tmp_path, monk
     assert deploy_record_settings[0].csv_path == Path("out/custom/version_log.csv")
 
 
+def test_prod_registration_uses_compose_exposed_app_port_when_web_port_unset(tmp_path, monkeypatch):
+    (tmp_path / "docker").mkdir()
+    (tmp_path / "docker" / "docker-compose.yml").write_text("services: {}\n")
+    (tmp_path / "docker" / "docker-compose.ubuntu.yml").write_text("services: {}\n")
+    (tmp_path / ".env.deploy").write_text(
+        "\n".join(
+            [
+                "UBUNTU_SSH_HOST=deploy@example.com",
+                "UBUNTU_REMOTE_DIR=/srv/prod",
+                "PUBLIC_DOMAIN=protected-container.zenia.eu",
+                "APP_IMAGE=example/app:staged",
+                "PORTAINER_STACK_NAME=protected-container",
+                "PORTAINER_ENDPOINT_ID=1",
+                "UBUNTU_BUILD_PUSH=false",
+                "UBUNTU_SYNC_SECRETS=false",
+            ]
+        )
+        + "\n"
+    )
+    (tmp_path / ".env.deploy.secrets").write_text("PORTAINER_ACCESS_TOKEN=token-123\n")
+
+    for key in [
+        "UBUNTU_SSH_HOST",
+        "UBUNTU_REMOTE_DIR",
+        "PUBLIC_DOMAIN",
+        "APP_IMAGE",
+        "PORTAINER_STACK_NAME",
+        "PORTAINER_ENDPOINT_ID",
+        "PORTAINER_ACCESS_TOKEN",
+        "PORTAINER_WEBHOOK_URL",
+        "PORTAINER_WEBHOOK_TOKEN",
+        "UBUNTU_COMPOSE_FILES",
+        "WEB_PORT",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+
+    class DummyHooks:
+        def call(self, hook_name, *args, **kwargs):
+            if hook_name == "configure_deploy_log":
+                settings = args[2]
+                settings.versioning_enabled = False
+            return None
+
+    class DummyResult:
+        returncode = 0
+        stdout = "hostname 192.168.1.241\n"
+        stderr = ""
+
+    def fake_run(*args, **kwargs):
+        return DummyResult()
+
+    def fake_render_compose_stack_content(*, repo_root, compose_files):
+        return """
+services:
+  app:
+    x-deploy-role: app
+    container_name: protected-container
+    image: example/app:staged
+    environment:
+      CODE_SERVER_PORT: 8080
+    expose:
+      - "8080"
+"""
+
+    registered_ports: list[str] = []
+
+    def fake_ensure_caddy_registration(**kwargs):
+        registered_ports.append(str(kwargs["port"]))
+        return None
+
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_hooks.load_hooks", lambda **kwargs: DummyHooks())
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.subprocess.run", fake_run)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy._run", lambda *args, **kwargs: None)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.render_compose_stack_content", fake_render_compose_stack_content)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.is_portainer_access_token_valid", lambda **kwargs: True)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.resolve_portainer_webhook_url_via_api", lambda **kwargs: "")
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.ensure_caddy_registration", fake_ensure_caddy_registration)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.is_domain_registered", lambda **kwargs: True)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log._read_app_version", lambda repo_root: "1.2.3")
+
+    main(["--prod"], repo_root_override=tmp_path)
+
+    assert registered_ports == ["8080"]
+
+
 def test_main_requires_post_merge_version_record_before_remote_work(tmp_path, monkeypatch):
     (tmp_path / "docker").mkdir()
     (tmp_path / "docker" / "docker-compose.yml").write_text("services: {}\n")

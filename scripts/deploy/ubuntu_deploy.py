@@ -376,6 +376,95 @@ def stack_has_service(*, stack_content: str, service_name: str) -> bool:
     return service_name in services
 
 
+def _port_number_text(value: str) -> str:
+    port_text = value.strip().split("/", 1)[0].strip()
+    return port_text if port_text.isdigit() else ""
+
+
+def _container_port_from_short_syntax(value: str) -> str:
+    port_text = value.strip().split("/", 1)[0].strip()
+    if ":" in port_text:
+        port_text = port_text.rsplit(":", 1)[1].strip()
+    return port_text if port_text.isdigit() else ""
+
+
+def _service_environment_value(service_payload: dict[str, Any], key: str) -> str:
+    environment = service_payload.get("environment")
+    if isinstance(environment, dict):
+        value = environment.get(key)
+        return str(value).strip() if value is not None else ""
+    if isinstance(environment, list):
+        prefix = f"{key}="
+        for item in environment:
+            if not isinstance(item, str) or not item.startswith(prefix):
+                continue
+            return item.split("=", 1)[1].strip()
+    return ""
+
+
+def _compose_app_service_payload(*, stack_content: str) -> dict[str, Any] | None:
+    payload = yaml.safe_load(stack_content)
+    if not isinstance(payload, dict):
+        return None
+
+    services = payload.get("services")
+    if not isinstance(services, dict):
+        return None
+
+    fallback_service = services.get("app")
+    for service_payload in services.values():
+        if not isinstance(service_payload, dict):
+            continue
+        deploy_role = str(service_payload.get("x-deploy-role") or "").strip()
+        if deploy_role == "app":
+            return service_payload
+
+    return fallback_service if isinstance(fallback_service, dict) else None
+
+
+def _compose_app_port(*, stack_content: str) -> str:
+    service_payload = _compose_app_service_payload(stack_content=stack_content)
+    if service_payload is None:
+        return ""
+
+    for env_key in [ENV_WEB_PORT, "CODE_SERVER_PORT"]:
+        env_port = _port_number_text(_service_environment_value(service_payload, env_key))
+        if env_port:
+            return env_port
+
+    expose_items = service_payload.get("expose")
+    if isinstance(expose_items, list):
+        for item in expose_items:
+            expose_port = _port_number_text(str(item))
+            if expose_port:
+                return expose_port
+
+    port_items = service_payload.get("ports")
+    if isinstance(port_items, list):
+        for item in port_items:
+            if isinstance(item, dict):
+                target_port = _port_number_text(str(item.get("target") or ""))
+                if target_port:
+                    return target_port
+                continue
+            container_port = _container_port_from_short_syntax(str(item))
+            if container_port:
+                return container_port
+
+    return ""
+
+
+def resolve_web_port_from_env_or_compose(*, repo_root: Path, stack_content: str, default: str = "3000") -> str:
+    configured_web_port = str(os.getenv(ENV_WEB_PORT) or "").strip()
+    if not configured_web_port:
+        configured_web_port = read_deploy_key(repo_root=repo_root, key=ENV_WEB_PORT)
+    if configured_web_port:
+        return configured_web_port
+
+    compose_web_port = _compose_app_port(stack_content=stack_content)
+    return compose_web_port or default
+
+
 
 
 def portainer_ensure_running_remote_cmd(*, https_port: int) -> str:
@@ -1101,11 +1190,10 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     if not hook_public_domain:
         hook_public_domain = read_deploy_key(repo_root=repo_root, key=ENV_PUBLIC_DOMAIN)
 
-    hook_web_port = str(os.getenv(ENV_WEB_PORT) or "").strip()
-    if not hook_web_port:
-        hook_web_port = read_deploy_key(repo_root=repo_root, key=ENV_WEB_PORT)
-    if not hook_web_port:
-        hook_web_port = "3000"
+    hook_web_port = resolve_web_port_from_env_or_compose(
+        repo_root=repo_root,
+        stack_content=stack_file_content,
+    )
 
     hook_plan = _build_ubuntu_deploy_hook_plan(
         stack_name=resolved_portainer_stack_name,
@@ -1423,11 +1511,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     if not resolved_public_domain:
         resolved_public_domain = read_deploy_key(repo_root=repo_root, key=ENV_PUBLIC_DOMAIN)
 
-    resolved_web_port = str(os.getenv(ENV_WEB_PORT) or "").strip()
-    if not resolved_web_port:
-        resolved_web_port = read_deploy_key(repo_root=repo_root, key=ENV_WEB_PORT)
-    if not resolved_web_port:
-        resolved_web_port = "3000"
+    resolved_web_port = str(hook_plan.app_port)
 
     resolved_caddy_proxy_dir = str(os.getenv(ENV_CADDY_PROXY_DIR) or "").strip()
     if not resolved_caddy_proxy_dir:

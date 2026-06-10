@@ -68,7 +68,7 @@ The deploy script derives all Caddy registration parameters from your env files:
 | Variable | Purpose | Example |
 |----------|---------|---------|
 | `PUBLIC_DOMAIN` | The domain Caddy should route to this service | `myapp.example.com` |
-| `WEB_PORT` | The port inside the container (default `3000`) | `8080` |
+| `WEB_PORT` | Optional override for the port inside the container. If unset, Ubuntu deploy uses the Compose app service `WEB_PORT`, `expose`, `ports`, or `CODE_SERVER_PORT`, then falls back to `3000`. | `8080` |
 | `PORTAINER_STACK_NAME` | Used as the upstream service name | `my-app-production` |
 | `EDGE_AUTH_MODE` | Selected route protection mode | `oidc` |
 | `AUTH_POLICY` | Authentik group/policy metadata for the route | `protected-container-users` |
@@ -76,6 +76,7 @@ The deploy script derives all Caddy registration parameters from your env files:
 ```dotenv
 # .env.deploy (relevant keys)
 PUBLIC_DOMAIN=myapp.example.com
+# Optional when Compose already exposes the app port.
 WEB_PORT=8080
 PORTAINER_STACK_NAME=my-app-production
 EDGE_AUTH_MODE=oidc
