@@ -32,6 +32,8 @@ from scripts.deploy.ubuntu_deploy import (
     read_deploy_key,
     read_deploy_secret_key,
     read_dotenv_key,
+    read_raw_dotenv_assignment_value,
+    validate_ubuntu_compose_secrets_file,
 )
 from scripts.deploy.portainer_helpers import (
     _extract_webhook_token,
@@ -623,6 +625,46 @@ def test_read_deploy_key_reads_remote_dir(tmp_path: Path):
 def test_read_dotenv_key_missing_file_returns_empty(tmp_path: Path):
     out = read_dotenv_key(dotenv_path=tmp_path / "missing.env", key="ANY_KEY")
     assert out == ""
+
+
+def test_read_raw_dotenv_assignment_value_preserves_quotes(tmp_path: Path):
+    dotenv_path = tmp_path / ".env.secrets"
+    dotenv_path.write_text(
+        "# comment\nBASIC_AUTH_HASH='$2a$14$abcdefghijklmnopqrstuvwxyzABCDEFGHijklmnopqrstuv'\n",
+        encoding="utf-8",
+    )
+
+    out = read_raw_dotenv_assignment_value(dotenv_path=dotenv_path, key="BASIC_AUTH_HASH")
+
+    assert out == "'$2a$14$abcdefghijklmnopqrstuvwxyzABCDEFGHijklmnopqrstuv'"
+
+
+def test_validate_ubuntu_compose_secrets_file_rejects_raw_bcrypt_hash(tmp_path: Path):
+    secrets_path = tmp_path / ".env.secrets"
+    secrets_path.write_text(
+        "BASIC_AUTH_HASH=$2a$14$abcdefghijklmnopqrstuvwxyzABCDEFGHijklmnopqrstuv\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        validate_ubuntu_compose_secrets_file(secrets_path=secrets_path)
+
+    assert "unescaped BASIC_AUTH_HASH" in str(excinfo.value)
+    assert "BASIC_AUTH_HASH='$2a$14$...'" in str(excinfo.value)
+
+
+def test_validate_ubuntu_compose_secrets_file_accepts_single_quoted_bcrypt_hash(tmp_path: Path):
+    secrets_path = tmp_path / ".env.secrets"
+    secrets_path.write_text(
+        "BASIC_AUTH_HASH='$2a$14$abcdefghijklmnopqrstuvwxyzABCDEFGHijklmnopqrstuv'\n",
+        encoding="utf-8",
+    )
+
+    validate_ubuntu_compose_secrets_file(secrets_path=secrets_path)
+
+
+def test_validate_ubuntu_compose_secrets_file_allows_missing_file(tmp_path: Path):
+    validate_ubuntu_compose_secrets_file(secrets_path=tmp_path / ".env.secrets")
 
 
 def test_parse_boolish_truthy_falsey_and_default():

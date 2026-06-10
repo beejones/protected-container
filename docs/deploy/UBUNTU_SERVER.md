@@ -40,6 +40,15 @@ Ensure your `.env` or `.env.secrets` has:
 ```env
 ACME_EMAIL=your-email@example.com
 ```
+
+If you are using Caddy Basic Auth, store `BASIC_AUTH_HASH` in `.env.secrets` wrapped in single quotes:
+
+```env
+BASIC_AUTH_HASH='$2a$14$...'
+```
+
+Do not use the raw `docker run --rm caddy:2-alpine caddy hash-password ...` output directly in Ubuntu/Portainer `.env.secrets`; Docker Compose and shell sourcing can interpolate `$`, and Caddy will receive a truncated hash.
+
 And your `.env.deploy` has at minimum:
 ```env
 UBUNTU_SSH_HOST=ronny@<server-ip>

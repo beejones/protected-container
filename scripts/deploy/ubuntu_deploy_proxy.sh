@@ -6,6 +6,17 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
 echo "[proxy-deploy] 🔍 Loading environment variables..."
+raw_basic_auth_hash=""
+if [ -f .env.secrets ]; then
+  raw_basic_auth_hash="$(grep -E '^BASIC_AUTH_HASH=' .env.secrets | tail -n1 | cut -d= -f2- | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+fi
+if [[ "${raw_basic_auth_hash}" == \$2* ]]; then
+  echo "[proxy-deploy] ❌ Error: BASIC_AUTH_HASH in .env.secrets must be wrapped in single quotes for Ubuntu/Portainer deploys." >&2
+  echo "[proxy-deploy]    Use: BASIC_AUTH_HASH='\$2a\$14\$...'" >&2
+  echo "[proxy-deploy]    Raw bcrypt hashes are truncated by Docker Compose/shell interpolation before Caddy sees them." >&2
+  exit 1
+fi
+
 set -a
 [ -f .env ] && source .env || true
 [ -f .env.secrets ] && source .env.secrets || true

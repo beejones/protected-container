@@ -90,17 +90,19 @@ cp env.example .env
 cp env.deploy.example .env.deploy
 
 # Generate a Basic Auth password hash
-docker run --rm caddy:2-alpine caddy hash-password --plaintext 'your-password'
+HASH=$(docker run --rm caddy:2-alpine caddy hash-password --plaintext 'your-password')
 
-# Add the hash to .env
+# Add the user and quoted hash to the env files
 echo 'BASIC_AUTH_USER=admin' >> .env
-echo 'BASIC_AUTH_HASH=<paste-hash-here>' >> .env
+printf "BASIC_AUTH_HASH='%s'\n" "$HASH" >> .env.secrets
 
 # Start the containers
 docker compose -f docker/docker-compose.yml up --build
 ```
 
 Open `https://localhost` (accept the self-signed cert warning for local dev).
+
+For Ubuntu/Portainer deploys, do not put the raw Caddy bcrypt hash in `.env.secrets`. Docker Compose and shell sourcing can interpolate `$`, so a raw hash such as `$2a$14$...` is truncated before Caddy receives it. Store it wrapped in single quotes, for example `BASIC_AUTH_HASH='$2a$14$...'`.
 
 ## Architecture
 

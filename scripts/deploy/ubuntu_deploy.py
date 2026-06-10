@@ -62,6 +62,7 @@ ENV_DEPLOY_HOOKS_SOFT_FAIL = "DEPLOY_HOOKS_SOFT_FAIL"
 ENV_STAGING_PUBLIC_DOMAIN = "STAGING_PUBLIC_DOMAIN"
 ENV_STAGING_REMOTE_DIR = "STAGING_REMOTE_DIR"
 ENV_STAGING_PORTAINER_STACK_NAME = "STAGING_PORTAINER_STACK_NAME"
+ENV_BASIC_AUTH_HASH = "BASIC_AUTH_HASH"
 
 
 _STORAGE_MANAGER_LABEL_PATTERN = re.compile(r"^storage-manager\.(\d+)\.(.+)$")
@@ -449,6 +450,40 @@ def read_deploy_key(*, repo_root: Path, key: str) -> str:
 
 def read_deploy_secret_key(*, repo_root: Path, key: str) -> str:
     return read_dotenv_key(dotenv_path=repo_root / ".env.deploy.secrets", key=key)
+
+
+def read_raw_dotenv_assignment_value(*, dotenv_path: Path, key: str) -> str:
+    if not dotenv_path.exists():
+        return ""
+
+    pattern = re.compile(rf"^(?:export\s+)?{re.escape(key)}\s*=(.*)$")
+    for line in dotenv_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = pattern.match(stripped)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
+def validate_ubuntu_compose_secrets_file(*, secrets_path: Path) -> None:
+    """Fail fast when secret values would be mangled by Docker Compose env_file parsing."""
+    if not secrets_path.exists():
+        return
+
+    basic_auth_hash = read_dotenv_key(dotenv_path=secrets_path, key=ENV_BASIC_AUTH_HASH)
+    raw_basic_auth_hash = read_raw_dotenv_assignment_value(
+        dotenv_path=secrets_path,
+        key=ENV_BASIC_AUTH_HASH,
+    )
+    if basic_auth_hash.startswith("$2") and not raw_basic_auth_hash.startswith("'"):
+        raise SystemExit(
+            f"{secrets_path} contains an unescaped {ENV_BASIC_AUTH_HASH}. "
+            "Docker Compose and shell sourcing can interpolate '$' characters, which truncates "
+            "bcrypt hashes before Caddy sees them. Wrap the hash in single quotes for "
+            "Ubuntu/Portainer, for example: BASIC_AUTH_HASH='$2a$14$...'"
+        )
 
 
 def parse_boolish(value: str, *, default: bool = False) -> bool:
@@ -1088,6 +1123,8 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     )
 
     if resolved_sync_secrets:
+        validate_ubuntu_compose_secrets_file(secrets_path=repo_root / ".env.secrets")
+
         env_paths: list[Path] = []
         for name in [".env", ".env.secrets", ".env.deploy", ".env.deploy.secrets"]:
             p = repo_root / name
