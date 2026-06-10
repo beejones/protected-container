@@ -9,13 +9,31 @@ This setup uses a **Centralized Proxy** approach:
 - All other containers (like `portainer` and `protected-container`) bind no host ports.
 - Caddy acts as the TLS terminator and routes incoming traffic to the appropriate containers via an external Docker network named `caddy`.
 
-## Prerequisites
+## Platform Contract
+
+The Ubuntu host is expected to provide a shared deployment control plane. `ubuntu_deploy.py` may create, recreate, or refresh these shared platform resources so the host stays in the documented shape:
+- Docker network: external bridge network named `caddy`.
+- Proxy container: `central-proxy`, owned by `docker/proxy/docker-compose.yml`, binding host ports `80` and `443`.
+- Admin container: `portainer`, using image `portainer/portainer-ce:latest`, attached to the `caddy` network, with no host port bindings.
+- Admin data volume: `portainer_data`, preserved when the `portainer` container is recreated.
+
+This control-plane convergence does **not** rewrite unrelated upstream application containers. App stacks are still deployed through their configured Compose/Portainer stack flow, and each web-facing app container is responsible for the shared Caddy ingress contract: join the external `caddy` network, use a unique container name, listen on the configured internal `WEB_PORT`, and avoid publishing public host ports for normal web traffic.
+
+## Ubuntu Platform Prerequisites
 
 - Ubuntu 24.04 LTS (recommended)
 - Docker Engine + Docker Compose plugin (`docker compose`)
-- SSH access to the server (key-based auth recommended)
+- SSH access to the server (key-based auth recommended), using an account that can run `docker` commands without an interactive password prompt
 - `rsync` installed locally and on the server
+- `curl`, `bash`, and the Docker CLI available on the server
+- DNS records for the Portainer domain and each app domain pointing at the Ubuntu host before Caddy requests certificates
 - **Firewall**: Ensure your server's firewall allows inbound TCP traffic on ports `80` and `443` ONLY. Do not expose `9000` or `9443` directly.
+
+After the first successful platform setup or deploy, the expected server state is:
+- `docker network inspect caddy` succeeds.
+- `docker ps --filter name=central-proxy` shows the central proxy running with host ports `80` and `443`.
+- `docker ps --filter name=portainer` shows Portainer running on the `caddy` network with no published host ports.
+- `https://portainer.<your-domain>` reaches Portainer through Caddy, not through direct `9000` or `9443` exposure.
 
 ## Initial Server Setup
 
