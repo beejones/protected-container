@@ -225,7 +225,7 @@ Provider: Google | Microsoft | Facebook
 ## Task Overview
 
 - [x] Phase 0: Cleanup and documentation audit
-- [ ] Phase 1: Caddy mechanism investigation and decision record
+- [x] Phase 1: Caddy mechanism investigation and decision record
 - [ ] Phase 2: Auth gateway selection and proof route
 - [ ] Phase 3: Env schema, secrets, user store, and provisioning contract
 - [ ] Phase 4: Shared Caddy auth snippet and route registration
@@ -269,26 +269,49 @@ Follow `.github/skills/code-cleanup/SKILL.md` and its `code-simplify` / `typed-c
 
 ### Tasks
 
-- [ ] Verify Caddy stock support for `forward_auth`, snippets/imports, header stripping, header copying, and reverse-proxy header setting against current docs.
-- [ ] Verify whether Caddy has any acceptable stock JWT/OIDC signing or validation mechanism; if not, record that an external gateway or custom module is required.
-- [ ] Decide the protected-route snippet/import structure that all generated app routes will use.
-- [ ] Decide whether Level 2 signed token proof is mandatory for all routes or only for apps that replace local auth.
-- [ ] Decide whether per-app `APP_SECRET` HMAC signing is acceptable or whether asymmetric JWKS signing is mandatory.
-- [ ] Decide the minimum route-origin proof for sensitive upstream containers: no direct port, private Docker network only, optional mTLS, and signed assertion verification.
-- [ ] Write a short decision section in the plan or a follow-up ADR-style doc.
+- [x] Verify Caddy stock support for `forward_auth`, snippets/imports, header stripping, header copying, and reverse-proxy header setting against current docs.
+- [x] Verify whether Caddy has any acceptable stock JWT/OIDC signing or validation mechanism; if not, record that an external gateway or custom module is required.
+- [x] Decide the protected-route snippet/import structure that all generated app routes will use.
+- [x] Decide whether Level 2 signed token proof is mandatory for all routes or only for apps that replace local auth.
+- [x] Decide whether per-app `APP_SECRET` HMAC signing is acceptable or whether asymmetric JWKS signing is mandatory.
+- [x] Decide the minimum route-origin proof for sensitive upstream containers: no direct port, private Docker network only, optional mTLS, and signed assertion verification.
+- [x] Write a short decision section in the plan or a follow-up ADR-style doc.
+
+### Phase 1 Decision Record
+
+Status: accepted for implementation planning on 2026-06-10.
+
+- Local stack evidence: the available `caddy:2-alpine` image is Caddy `v2.11.2`. Its stock module list includes `http.handlers.reverse_proxy`, `http.handlers.headers`, `http.handlers.authentication`, and `http.authentication.providers.http_basic`. It does not include stock OIDC or JWT auth/signing modules.
+- Official Caddy docs confirm `forward_auth` is a Caddyfile shortcut over `reverse_proxy` for auth gateway pre-checks. It sends a cloned request to the gateway, grants access on `2xx`, copies configured response headers to the original request via `copy_headers`, and otherwise returns the gateway response to the client.
+- Official Caddy docs confirm snippets and `import` can be reused in site blocks, and site blocks do not inherit behavior from each other. Therefore every protected app route must explicitly import the protected auth guard.
+- Official Caddy docs confirm `request_header -Header-Name` deletes request headers and `reverse_proxy header_up` can set/add/delete upstream request headers. The protected auth guard will strip client-supplied identity/proof headers before `forward_auth` runs, then only copy gateway-approved identity/proof headers.
+- Caddy owns TLS, site matching, shared auth-guard import, request-header stripping, `forward_auth`, copied identity/proof headers, and reverse proxying to private Docker-network upstreams.
+- The auth gateway owns login redirects, provider sessions, user approval/authorization, group/policy checks, user store, access-request UX, and Level 2 assertion signing. Caddy must not store app signing keys or mint JWTs.
+- Generated protected app routes will use one shared snippet, tentatively `(protected_auth)`, imported before `reverse_proxy`. Auth gateway callback/login routes must not import this snippet.
+- Level 1 trusted headers are acceptable for display/audit identity only when the app is reachable exclusively through central Caddy. Level 2 signed assertion proof is mandatory before a sensitive app disables or replaces local auth.
+- Default Level 2 signing model is asymmetric JWKS: the gateway keeps the private key, and apps verify issuer, audience, expiry, and signature with a public key/JWKS. Per-app `APP_SECRET` HMAC signing is compatibility-only and must be opt-in through a secret reference, never raw secret material in Caddyfile output.
+- Minimum route-origin proof for sensitive upstreams is: no public app host ports, private Docker network ingress only through Caddy, trusted proxy/header configuration in the app, signed assertion verification, and optional mTLS as an extra origin signal rather than user auth.
+
+### Phase 1 Verification Evidence
+
+- `docker run --rm caddy:2-alpine caddy version` returned `v2.11.2`.
+- `docker run --rm caddy:2-alpine caddy list-modules | rg 'http.handlers.reverse_proxy|http.handlers.authentication|http.authentication|http.handlers.request_header|http.handlers.headers|forward_auth'` confirmed stock reverse proxy, headers, authentication, and Basic Auth modules; no stock OIDC/JWT auth module was present in the local image.
+- A temporary Caddyfile under `out/tmp` with `(protected_auth)`, `request_header` deletions, `forward_auth`, `copy_headers` renames, snippet `import`, and `reverse_proxy` validated successfully with `docker run --rm -v "$PWD/out/tmp/caddy-phase1-forward-auth.Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`. The temporary file was deleted after validation.
+- `docker compose -f docker/proxy/docker-compose.yml config --no-env-resolution --no-interpolate` rendered the proxy compose model with central Caddy publishing only `80` and `443`, without expanding env-file values.
+- Official sources consulted: `https://caddyserver.com/docs/caddyfile/directives/forward_auth`, `https://caddyserver.com/docs/caddyfile/directives/request_header`, `https://caddyserver.com/docs/caddyfile/directives/reverse_proxy`, `https://caddyserver.com/docs/caddyfile/concepts`, `https://caddyserver.com/docs/caddyfile/directives/basic_auth`, and `https://caddyserver.com/docs/modules/`.
 
 ### Acceptance Criteria
 
-- [ ] The plan states exactly what Caddy owns and what the auth gateway owns.
-- [ ] The plan states how identity spoofing is prevented before headers reach apps.
-- [ ] The plan states what proof apps receive and how they should verify it.
-- [ ] The plan states whether raw app secrets ever leave app-owned secret storage.
-- [ ] The plan states what remains at risk if Caddy itself is compromised and which controls reduce that blast radius.
+- [x] The plan states exactly what Caddy owns and what the auth gateway owns.
+- [x] The plan states how identity spoofing is prevented before headers reach apps.
+- [x] The plan states what proof apps receive and how they should verify it.
+- [x] The plan states whether raw app secrets ever leave app-owned secret storage.
+- [x] The plan states what remains at risk if Caddy itself is compromised and which controls reduce that blast radius.
 
 ### Verification
 
-- [ ] `docker run --rm caddy:2-alpine caddy list-modules | grep -E 'reverse_proxy|authentication'` or equivalent module check if Docker is available.
-- [ ] `docker compose -f docker/proxy/docker-compose.yml config`
+- [x] `docker run --rm caddy:2-alpine caddy list-modules | grep -E 'reverse_proxy|authentication'` or equivalent module check if Docker is available.
+- [x] `docker compose -f docker/proxy/docker-compose.yml config --no-env-resolution --no-interpolate`
 
 ### Files Likely Touched
 
@@ -298,7 +321,7 @@ Follow `.github/skills/code-cleanup/SKILL.md` and its `code-simplify` / `typed-c
 
 ### Exit Criteria
 
-- [ ] The design no longer depends on assumed Caddy behavior.
+- [x] The design no longer depends on assumed Caddy behavior.
 
 ## Phase 2 - Auth Gateway Selection And Proof Route
 
