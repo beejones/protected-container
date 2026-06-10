@@ -505,7 +505,9 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 - `scripts/deploy/ubuntu_deploy.py` now resolves edge-auth registration values from process env or `.env.deploy` only and passes the selected auth contract into Caddy registration and verification without reading `.env.deploy.secrets`.
 - `scripts/deploy/ubuntu_deploy.py` now derives the registration upstream port from the rendered Compose app service when `WEB_PORT` is unset, so the default code-server container registers against `8080` instead of the legacy `3000` fallback.
 - `scripts/deploy/ubuntu_deploy.py` now refreshes the central proxy stack in OIDC mode before route registration, and `scripts/deploy/ubuntu_deploy_proxy.sh` starts the proxy compose stack with `--profile oidc` so Authentik services exist for `forward_auth`.
+- `scripts/deploy/ubuntu_deploy.py` now treats failed Caddy registration verification as a deploy failure instead of allowing a swap to report success while the public route still uses the wrong edge-auth mode.
 - `docs/deploy/SHARED_CADDY_ROUTING.md` now documents `EDGE_AUTH_MODE=basic|oidc|public`, OIDC profile startup, generated route repair behavior, and Basic Auth rollback.
+- `docs/deploy/APP_CONTAINER_OIDC_MIGRATION.md` now uses protected-container as the reference app-container migration and checklist for other containers moving from Basic Auth to central OIDC.
 
 ### Acceptance Criteria
 
@@ -525,7 +527,9 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 - [x] `source .venv/bin/activate && python -m pytest -q tests/pytests` (`221 passed`).
 - [x] `docker compose -f docker/proxy/docker-compose.yml config --no-env-resolution --no-interpolate`.
 - [x] `docker run --rm -v "$PWD/docker/proxy/Caddyfile:/etc/caddy/Caddyfile:ro" -e ACME_EMAIL=ops@example.com -e PUBLIC_DOMAIN=app.example.com -e BASIC_AUTH_USER=admin -e 'BASIC_AUTH_HASH=$2a$14$abcdefghijklmnopqrstuvwxyzABCDEFGHijklmnopqrstuv' -e EDGE_AUTH_GATEWAY_SERVICE=authentik-server -e EDGE_AUTH_GATEWAY_PORT=9000 -e EDGE_AUTH_VERIFY_URI=/outpost.goauthentik.io/auth/caddy -e AUTHENTIK_PUBLIC_DOMAIN=auth.example.com caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`.
-- [ ] `docker exec central-proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile` on staging.
+- [x] `docker exec central-proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile` on Ubuntu after protected-container OIDC route rewrite (`Valid configuration`).
+- [x] `curl -k -sS -D - -o /dev/null https://protected-container.zenia.eu | sed -n '1,24p'` no longer returns `WWW-Authenticate: Basic`; it returns an Authentik response, proving the public Caddy route is no longer the old Basic Auth route.
+- [ ] Configure Authentik application/provider/outpost for `protected-container.zenia.eu`; the current public response is Authentik `404`, which means the request reaches Authentik but the app-side Authentik configuration is incomplete.
 - [ ] Manual staging proof-route checks for anonymous redirect/denial, authenticated unauthorized denial, approved access, identity headers, and `X-Auth-Token` presence.
 
 ### Files Likely Touched

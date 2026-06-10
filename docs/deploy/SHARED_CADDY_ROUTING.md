@@ -27,6 +27,8 @@ App-specific auth such as session login or API keys remains separate defense-in-
 
 Apps that consume central identity headers or signed proof must follow the [Upstream Auth Contract](UPSTREAM_AUTH_CONTRACT.md). Do not disable app-local auth until the app has passed the contract checklist for its chosen proof level.
 
+For the protected-container reference migration and the reusable checklist for other app containers, see [App Container OIDC Migration](APP_CONTAINER_OIDC_MIGRATION.md).
+
 When `EDGE_AUTH_MODE=oidc` is enabled, the central proxy stack must also run the Authentik services from the `oidc` Compose profile:
 
 ```bash
@@ -97,6 +99,7 @@ The deploy script automatically:
 3. If missing, appends a site block for the selected `EDGE_AUTH_MODE` plus `reverse_proxy <service>:<port>`.
 4. If an existing domain block is present but stale, unprotected, or still Basic-Auth-only while OIDC mode is selected, rewrites it with the selected route contract.
 5. Restarts the `central-proxy` container and validates the config.
+6. Fails the deploy if the route cannot be verified for the selected edge-auth mode.
 
 No manual SSH or Caddyfile editing required.
 

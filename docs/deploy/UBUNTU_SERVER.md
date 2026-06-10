@@ -135,6 +135,8 @@ If you have additional services on the same server that need HTTPS routing throu
 
 If those services plan to consume central identity headers or replace app-local auth, also follow the [Upstream Auth Contract](UPSTREAM_AUTH_CONTRACT.md).
 
+For the protected-container OIDC migration example and the checklist to apply to other app containers, see [App Container OIDC Migration](APP_CONTAINER_OIDC_MIGRATION.md).
+
 ## Staging and Production Promotion
 
 For predeploying staging as stopped containers, promoting that staged build into the production stack with `--swap`, and keeping `PUBLIC_DOMAIN` routed to production, see [Staging Environment](STAGING.md).

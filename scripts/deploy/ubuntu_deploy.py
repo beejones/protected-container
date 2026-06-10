@@ -1566,19 +1566,15 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                     icon="✅",
                 )
             else:
-                log_info(
-                    (
-                        f"Caddy registration could not be verified for {resolved_public_domain}. "
-                        f"Checked Caddyfile: {caddyfile_path}. "
-                        "Deployment continues, but HTTPS routing may be unavailable."
-                    ),
-                    icon="⚠️",
+                raise SystemExit(
+                    f"Caddy registration could not be verified for {resolved_public_domain}. "
+                    f"Checked Caddyfile: {caddyfile_path}. "
+                    "The stack may be deployed, but the public route did not match the selected edge auth mode."
                 )
         except Exception as exc:
-            log_info(f"Caddy registration failed: {exc}", icon="⚠️")
-            log_info(
-                "Deployment completed, but public HTTPS routing may be unavailable until Caddy is fixed.",
-                icon="⚠️",
+            raise SystemExit(
+                f"Caddy registration failed for {resolved_public_domain}. "
+                f"Checked Caddyfile: {caddyfile_path}. {exc}"
             )
     else:
         log_info("PUBLIC_DOMAIN not set — skipping Caddy registration.", icon="⚠️")

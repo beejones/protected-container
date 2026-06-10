@@ -264,6 +264,93 @@ def test_swap_promotes_to_production_stack_and_stops_only_staging(tmp_path, monk
     assert deploy_record_settings[0].csv_path == Path("out/custom/version_log.csv")
 
 
+def test_swap_oidc_deploy_fails_when_caddy_registration_stays_basic(tmp_path, monkeypatch) -> None:
+    (tmp_path / "docker").mkdir()
+    (tmp_path / "scripts" / "deploy").mkdir(parents=True)
+    (tmp_path / "docker" / "docker-compose.yml").write_text("services: {}\n")
+    (tmp_path / "docker" / "docker-compose.ubuntu.yml").write_text("services: {}\n")
+    (tmp_path / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh").write_text("#!/usr/bin/env bash\n")
+    (tmp_path / ".env").write_text("ACME_EMAIL=ops@example.com\n")
+    (tmp_path / ".env.secrets").write_text("BASIC_AUTH_HASH='$2a$14$placeholder'\n")
+    (tmp_path / ".env.deploy").write_text(
+        "\n".join(
+            [
+                "UBUNTU_SSH_HOST=deploy@example.com",
+                "UBUNTU_REMOTE_DIR=/srv/prod",
+                "PUBLIC_DOMAIN=protected-container.zenia.eu",
+                "APP_IMAGE=example/app:staged",
+                "PORTAINER_STACK_NAME=protected-container",
+                "PORTAINER_ENDPOINT_ID=1",
+                "STAGING_PORTAINER_STACK_NAME=staging-protected-container",
+                "UBUNTU_BUILD_PUSH=false",
+                "UBUNTU_SYNC_SECRETS=true",
+                "EDGE_AUTH_MODE=oidc",
+                "AUTHENTIK_PUBLIC_DOMAIN=auth.zenia.eu",
+            ]
+        )
+        + "\n"
+    )
+    (tmp_path / ".env.deploy.secrets").write_text("PORTAINER_ACCESS_TOKEN=token-123\n")
+
+    for key in [
+        "UBUNTU_SSH_HOST",
+        "UBUNTU_REMOTE_DIR",
+        "PUBLIC_DOMAIN",
+        "APP_IMAGE",
+        "PORTAINER_STACK_NAME",
+        "PORTAINER_ENDPOINT_ID",
+        "STAGING_PORTAINER_STACK_NAME",
+        "PORTAINER_ACCESS_TOKEN",
+        "PORTAINER_WEBHOOK_URL",
+        "PORTAINER_WEBHOOK_TOKEN",
+        "UBUNTU_COMPOSE_FILES",
+        "EDGE_AUTH_MODE",
+        "AUTHENTIK_PUBLIC_DOMAIN",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+
+    class DummyHooks:
+        def call(self, hook_name, *args, **kwargs):
+            if hook_name == "configure_deploy_log":
+                settings = args[2]
+                settings.versioning_enabled = False
+            return None
+
+    class DummyResult:
+        returncode = 0
+        stdout = "hostname 192.168.1.241\n"
+        stderr = ""
+
+    def fake_run(*args, **kwargs):
+        return DummyResult()
+
+    def fake_render_compose_stack_content(*, repo_root, compose_files):
+        return """
+services:
+  app:
+    x-deploy-role: app
+    container_name: protected-container
+    image: example/app:staged
+    expose:
+      - "8080"
+"""
+
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_hooks.load_hooks", lambda **kwargs: DummyHooks())
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.subprocess.run", fake_run)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy._run", lambda *args, **kwargs: None)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.render_compose_stack_content", fake_render_compose_stack_content)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.is_portainer_access_token_valid", lambda **kwargs: True)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.resolve_portainer_webhook_url_via_api", lambda **kwargs: "")
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.list_portainer_stack_containers", lambda **kwargs: [{"Id": "staging123", "Names": ["/staging-protected-container"]}])
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.set_portainer_stack_containers_state", lambda **kwargs: [kwargs["stack_name"]])
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.ensure_caddy_registration", lambda **kwargs: None)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.is_domain_registered", lambda **kwargs: False)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log._read_app_version", lambda repo_root: "1.2.3")
+
+    with pytest.raises(SystemExit, match="Caddy registration could not be verified"):
+        main(["--swap"], repo_root_override=tmp_path)
+
+
 def test_prod_registration_uses_compose_exposed_app_port_when_web_port_unset(tmp_path, monkeypatch):
     (tmp_path / "docker").mkdir()
     (tmp_path / "docker" / "docker-compose.yml").write_text("services: {}\n")
