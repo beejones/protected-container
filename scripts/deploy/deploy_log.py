@@ -5,11 +5,9 @@ the git ref, local branch, version, target environment, stack name, domain,
 image, and status.
 Newest records are stored directly under the CSV header.
 
-For a merged git ref, the version log increments APP_VERSION and records that
-version after /changelog has prepared the matching CHANGELOG.md entry. Later
-deploy records for that same git ref reuse the version already recorded in the
-version log. Deploys for a git ref that is not already in the log use the
-current APP_VERSION.
+For a git ref that already has a successful record, later records reuse the
+version already recorded in the version log. For a new git ref, the log records
+the current APP_VERSION without inferring a future version from existing rows.
 """
 
 from __future__ import annotations
@@ -48,7 +46,6 @@ LEGACY_CSV_COLUMNS = [
     "status",
 ]
 
-_CHANGELOG_VERSION_HEADING_RE = re.compile(r"^## \[(?P<version>\d+\.\d+\.\d+)\]")
 _SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 _GIT_REF_COLUMN = CSV_COLUMNS.index("git_ref")
 _STATUS_COLUMN = CSV_COLUMNS.index("status")
@@ -111,6 +108,12 @@ def _increment_patch(version: str) -> str:
     return f"{major}.{minor}.{patch + 1}"
 
 
+def _validate_app_version(version: str) -> None:
+    """Validate that an app version has semver shape."""
+    if not _SEMVER_RE.match(version.strip()):
+        raise RuntimeError("APP_VERSION must be valid x.y.z semver before recording a git ref.")
+
+
 def _write_app_version(repo_root: Path, new_version: str) -> None:
     """Update APP_VERSION in .env in-place."""
     env_path = repo_root / ".env"
@@ -129,27 +132,6 @@ def _write_app_version(repo_root: Path, new_version: str) -> None:
     if not found:
         lines.append(f"APP_VERSION={new_version}")
     env_path.write_text("\n".join(lines) + "\n")
-
-
-def _changelog_has_version_entry(repo_root: Path, version: str) -> bool:
-    """Return whether CHANGELOG.md already contains a heading for version."""
-    changelog_path = repo_root / "CHANGELOG.md"
-    if not changelog_path.exists():
-        return False
-    for line in changelog_path.read_text().splitlines():
-        match = _CHANGELOG_VERSION_HEADING_RE.match(line.strip())
-        if match and match.group("version") == version:
-            return True
-    return False
-
-
-def _require_changelog_entry_for_version(repo_root: Path, version: str) -> None:
-    """Fail before recording a version that /changelog has not prepared."""
-    if _changelog_has_version_entry(repo_root, version):
-        return
-    raise RuntimeError(
-        f"CHANGELOG.md is missing an entry for {version}. Run /changelog before recording a new git ref."
-    )
 
 
 def get_csv_path(repo_root: Path) -> Path:
@@ -201,6 +183,18 @@ def _read_existing_deploy_rows(csv_path: Path) -> list[list[str]]:
     if rows[0] == CSV_COLUMNS or rows[0] == LEGACY_CSV_COLUMNS:
         return [_normalize_existing_row(row) for row in rows[1:]]
     return [_normalize_existing_row(row) for row in rows]
+
+
+def require_version_record_for_deploy(
+    *,
+    repo_root: Path,
+    settings: DeployLogSettings,
+    status: str,
+    git_ref: str | None = None,
+    version: str | None = None,
+) -> None:
+    """Compatibility no-op: deploy logging no longer requires a pre-existing row."""
+    return
 
 
 def append_deploy_record(
@@ -297,7 +291,7 @@ def append_merge_record(
     local_branch: str | None = None,
     version: str | None = None,
 ) -> Path:
-    """Bump APP_VERSION and record a post-merge row unless the git ref is already logged."""
+    """Record the current app version for a git ref unless that ref is already logged."""
     resolved_settings = settings if settings is not None else default_deploy_log_settings(repo_root)
     csv_path = _resolve_csv_path(repo_root=repo_root, csv_path=resolved_settings.csv_path)
     existing_rows = _read_existing_deploy_rows(csv_path)
@@ -306,14 +300,9 @@ def append_merge_record(
         return csv_path
 
     current_version = _read_app_version(repo_root)
-    should_persist_version = version is None
-    if version is None:
-        resolved_version = _increment_patch(current_version)
-    else:
-        resolved_version = version
-
+    resolved_version = version if version is not None else current_version
     if resolved_settings.versioning_enabled:
-        _require_changelog_entry_for_version(repo_root, resolved_version)
+        _validate_app_version(resolved_version)
 
     written_path = append_deploy_record_with_settings(
         repo_root=repo_root,
@@ -327,8 +316,6 @@ def append_merge_record(
         local_branch=local_branch,
         version=resolved_version,
     )
-    if should_persist_version:
-        _write_app_version(repo_root, resolved_version)
     return written_path
 
 

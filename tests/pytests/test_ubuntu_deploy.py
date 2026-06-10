@@ -194,7 +194,10 @@ def test_swap_promotes_to_production_stack_and_stops_only_staging(tmp_path, monk
         )
         + "\n"
     )
-    (tmp_path / ".env.deploy.secrets").write_text("PORTAINER_ACCESS_TOKEN=token-123\n")
+    (tmp_path / ".env.deploy.secrets").write_text(
+        "PORTAINER_WEBHOOK_URL=https://portainer.zenia.eu/api/stacks/webhooks/test-token\n"
+        "PORTAINER_ACCESS_TOKEN=token-123\n"
+    )
 
     for key in [
         "UBUNTU_SSH_HOST",
@@ -357,6 +360,18 @@ def test_main_allows_new_git_ref_before_remote_work(tmp_path, monkeypatch):
     main(["--prod", "--skip-build-push"], repo_root_override=tmp_path)
 
     assert ["ssh", "deploy@example.com", "echo SSH_OK"] in remote_calls
+
+
+def test_deploy_version_preflight_does_not_require_existing_record(tmp_path):
+    (tmp_path / ".env").write_text("APP_VERSION=1.2.4\n")
+    settings = deploy_log.default_deploy_log_settings(tmp_path)
+
+    deploy_log.require_version_record_for_deploy(
+        repo_root=tmp_path,
+        settings=settings,
+        status="success",
+        git_ref="new-git-ref",
+    )
 
 
 def test_rewrite_staging_container_names_for_portainer_avoids_production_name_collisions():
