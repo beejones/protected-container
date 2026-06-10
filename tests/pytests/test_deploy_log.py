@@ -168,20 +168,20 @@ class TestAppendDeployRecord:
         assert rows[2][3] == "1.2.3"
         assert rows[2][4] == "swap"
 
-    def test_production_success_requires_post_merge_version_record(self, tmp_repo: Path) -> None:
-        with pytest.raises(RuntimeError, match="post-merge version-log command"):
-            append_deploy_record(
-                repo_root=tmp_repo,
-                target="production",
-                stack_name="prod-stack",
-                domain="prod.example.com",
-                image="img",
-                status="success",
-                git_ref="d" * 40,
-                local_branch="main",
-            )
+    def test_production_success_records_current_version_without_existing_record(self, tmp_repo: Path) -> None:
+        csv_path = append_deploy_record(
+            repo_root=tmp_repo,
+            target="production",
+            stack_name="prod-stack",
+            domain="prod.example.com",
+            image="img",
+            status="success",
+            git_ref="d" * 40,
+            local_branch="main",
+        )
 
-        assert not get_csv_path(tmp_repo).exists()
+        rows = list(csv.reader(csv_path.open()))
+        assert rows[1][3] == "1.2.3"
 
     def test_production_success_reuses_post_merge_version_record(self, tmp_repo: Path) -> None:
         append_merge_record(
@@ -200,11 +200,11 @@ class TestAppendDeployRecord:
             local_branch="main",
         )
         rows = list(csv.reader(csv_path.open()))
-        assert rows[1][3] == "1.2.4"
+        assert rows[1][3] == "1.2.3"
         content = (tmp_repo / ".env").read_text()
-        assert "APP_VERSION=1.2.4" in content
+        assert "APP_VERSION=1.2.3" in content
 
-    def test_merge_record_bumps_and_records_post_merge_version(self, tmp_repo: Path) -> None:
+    def test_merge_record_records_current_app_version(self, tmp_repo: Path) -> None:
         csv_path = append_merge_record(
             repo_root=tmp_repo,
             git_ref="d" * 40,
@@ -215,28 +215,28 @@ class TestAppendDeployRecord:
         assert rows[0] == CSV_COLUMNS
         assert rows[1][1] == "d" * 40
         assert rows[1][2] == "main"
-        assert rows[1][3] == "1.2.4"
+        assert rows[1][3] == "1.2.3"
         assert rows[1][4] == "merge"
         assert rows[1][5] == ""
         assert rows[1][6] == ""
         assert rows[1][7] == ""
         assert rows[1][8] == "success"
-        assert "APP_VERSION=1.2.4" in (tmp_repo / ".env").read_text()
-
-    def test_merge_record_requires_changelog_entry(self, tmp_repo: Path) -> None:
-        (tmp_repo / "CHANGELOG.md").write_text("# Changelog\n\n## [1.2.3] - 2026-06-08\n")
-
-        with pytest.raises(RuntimeError, match="1.2.4"):
-            append_merge_record(
-                repo_root=tmp_repo,
-                git_ref="d" * 40,
-                local_branch="main",
-            )
-
-        assert not get_csv_path(tmp_repo).exists()
         assert "APP_VERSION=1.2.3" in (tmp_repo / ".env").read_text()
 
-    def test_merge_record_without_changelog_enforcement_still_bumps_new_git_ref(self, tmp_repo: Path) -> None:
+    def test_merge_record_does_not_require_changelog_entry(self, tmp_repo: Path) -> None:
+        (tmp_repo / "CHANGELOG.md").write_text("# Changelog\n\n## [1.2.3] - 2026-06-08\n")
+
+        csv_path = append_merge_record(
+            repo_root=tmp_repo,
+            git_ref="d" * 40,
+            local_branch="main",
+        )
+
+        rows = list(csv.reader(csv_path.open()))
+        assert rows[1][3] == "1.2.3"
+        assert "APP_VERSION=1.2.3" in (tmp_repo / ".env").read_text()
+
+    def test_merge_record_without_changelog_enforcement_records_current_version(self, tmp_repo: Path) -> None:
         csv_path = tmp_repo / "out" / "deploy" / "version_log.csv"
         csv_path.parent.mkdir(parents=True)
         with csv_path.open("w", newline="") as f:
@@ -255,11 +255,11 @@ class TestAppendDeployRecord:
 
         rows = list(csv.reader(csv_path.open()))
         assert rows[1][1] == "1" * 40
-        assert rows[1][3] == "1.2.4"
+        assert rows[1][3] == "1.2.3"
         assert rows[1][4] == "merge"
         assert rows[2][1] == "0" * 40
         assert rows[2][3] == "1.2.3"
-        assert "APP_VERSION=1.2.4" in (tmp_repo / ".env").read_text()
+        assert "APP_VERSION=1.2.3" in (tmp_repo / ".env").read_text()
 
     def test_merge_record_requires_valid_current_app_version(self, tmp_repo: Path) -> None:
         (tmp_repo / ".env").write_text("APP_VERSION=not-semver\n")
@@ -287,7 +287,7 @@ class TestAppendDeployRecord:
 
         rows = list(csv.reader(csv_path.open()))
         assert len(rows) == 2
-        assert rows[1][3] == "1.2.4"
+        assert rows[1][3] == "1.2.3"
 
     def test_deploy_reuses_post_merge_version_for_same_git_ref(self, tmp_repo: Path) -> None:
         append_merge_record(
@@ -309,9 +309,9 @@ class TestAppendDeployRecord:
         )
 
         rows = list(csv.reader(csv_path.open()))
-        assert rows[1][3] == "1.2.4"
+        assert rows[1][3] == "1.2.3"
         assert rows[1][4] == "production"
-        assert rows[2][3] == "1.2.4"
+        assert rows[2][3] == "1.2.3"
         assert rows[2][4] == "merge"
 
     def test_staging_success_for_same_git_ref_does_not_increment_again(self, tmp_repo: Path) -> None:
@@ -335,7 +335,7 @@ class TestAppendDeployRecord:
         content = (tmp_repo / ".env").read_text()
         assert "APP_VERSION=1.2.3" in content
 
-    def test_staging_success_for_new_git_ref_requires_post_merge_version_record(self, tmp_repo: Path) -> None:
+    def test_staging_success_for_new_git_ref_records_current_version(self, tmp_repo: Path) -> None:
         _write_app_version(tmp_repo, "1.2.4")
         (tmp_repo / "CHANGELOG.md").write_text("# Changelog\n\n## [1.2.4] - 2026-06-09\n")
         csv_path = tmp_repo / "out" / "deploy" / "version_log.csv"
@@ -345,22 +345,23 @@ class TestAppendDeployRecord:
             writer.writerow(CSV_COLUMNS)
             writer.writerow(["2026-05-18T00:00:00Z", "0" * 40, "main", "1.2.3", "swap", "prod-stack", "prod.example.com", "img", "success"])
 
-        with pytest.raises(RuntimeError, match="post-merge version-log command"):
-            append_deploy_record(
-                repo_root=tmp_repo,
-                target="staging",
-                stack_name="stg-stack",
-                domain="stg.example.com",
-                image="img",
-                status="success",
-                git_ref="1" * 40,
-                local_branch="release/deploy",
-            )
+        csv_path = append_deploy_record(
+            repo_root=tmp_repo,
+            target="staging",
+            stack_name="stg-stack",
+            domain="stg.example.com",
+            image="img",
+            status="success",
+            git_ref="1" * 40,
+            local_branch="release/deploy",
+        )
 
+        rows = list(csv.reader(csv_path.open()))
+        assert rows[1][3] == "1.2.4"
         content = (tmp_repo / ".env").read_text()
         assert "APP_VERSION=1.2.4" in content
 
-    def test_swap_success_for_new_git_ref_requires_post_merge_version_record(self, tmp_repo: Path) -> None:
+    def test_swap_success_for_new_git_ref_records_current_version(self, tmp_repo: Path) -> None:
         _write_app_version(tmp_repo, "1.2.4")
         (tmp_repo / "CHANGELOG.md").write_text("# Changelog\n\n## [1.2.4] - 2026-06-09\n")
         csv_path = tmp_repo / "out" / "deploy" / "version_log.csv"
@@ -370,18 +371,19 @@ class TestAppendDeployRecord:
             writer.writerow(CSV_COLUMNS)
             writer.writerow(["2026-05-18T00:00:00Z", "0" * 40, "main", "1.2.3", "swap", "prod-stack", "prod.example.com", "img", "success"])
 
-        with pytest.raises(RuntimeError, match="post-merge version-log command"):
-            append_deploy_record(
-                repo_root=tmp_repo,
-                target="swap",
-                stack_name="prod-stack",
-                domain="prod.example.com",
-                image="img",
-                status="success",
-                git_ref="1" * 40,
-                local_branch="release/deploy",
-            )
+        csv_path = append_deploy_record(
+            repo_root=tmp_repo,
+            target="swap",
+            stack_name="prod-stack",
+            domain="prod.example.com",
+            image="img",
+            status="success",
+            git_ref="1" * 40,
+            local_branch="release/deploy",
+        )
 
+        rows = list(csv.reader(csv_path.open()))
+        assert rows[1][3] == "1.2.4"
         content = (tmp_repo / ".env").read_text()
         assert "APP_VERSION=1.2.4" in content
 

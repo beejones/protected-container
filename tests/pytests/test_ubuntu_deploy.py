@@ -166,7 +166,9 @@ def test_swap_promotes_to_production_stack_and_stops_only_staging(tmp_path, monk
         )
         + "\n"
     )
-    (tmp_path / ".env.deploy.secrets").write_text("PORTAINER_ACCESS_TOKEN=token-123\n")
+    (tmp_path / ".env.deploy.secrets").write_text(
+        "PORTAINER_WEBHOOK_URL=https://portainer.zenia.eu/api/stacks/webhooks/test-token\n"
+    )
 
     for key in [
         "UBUNTU_SSH_HOST",
@@ -261,7 +263,7 @@ def test_swap_promotes_to_production_stack_and_stops_only_staging(tmp_path, monk
     assert deploy_record_settings[0].csv_path == Path("out/custom/version_log.csv")
 
 
-def test_main_requires_post_merge_version_record_before_remote_work(tmp_path, monkeypatch):
+def test_main_does_not_require_post_merge_version_record_before_remote_work(tmp_path, monkeypatch):
     (tmp_path / "docker").mkdir()
     (tmp_path / "docker" / "docker-compose.yml").write_text("services: {}\n")
     (tmp_path / "docker" / "docker-compose.ubuntu.yml").write_text("services: {}\n")
@@ -308,7 +310,12 @@ def test_main_requires_post_merge_version_record_before_remote_work(tmp_path, mo
 
     def fake_run(cmd, *args, **kwargs):
         remote_calls.append(cmd)
-        raise AssertionError("remote commands should not run before changelog validation")
+        class Result:
+            returncode = 0
+            stdout = "SSH_OK\n"
+            stderr = ""
+
+        return Result()
 
     def fake_render_compose_stack_content(*, repo_root, compose_files):
         return "services:\n  app:\n    image: example/app:staged\n"
@@ -316,12 +323,16 @@ def test_main_requires_post_merge_version_record_before_remote_work(tmp_path, mo
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_hooks.load_hooks", lambda **kwargs: DummyHooks())
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.render_compose_stack_content", fake_render_compose_stack_content)
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log._get_git_ref", lambda repo_root: "new-git-ref")
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log._get_local_branch", lambda repo_root: "main")
+    monkeypatch.setattr(
+        "scripts.deploy.ubuntu_deploy.portainer_helpers.is_portainer_access_token_valid",
+        lambda **kwargs: True,
+    )
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.subprocess.run", fake_run)
 
-    with pytest.raises(RuntimeError, match="post-merge version-log command"):
-        main([], repo_root_override=tmp_path)
+    main([], repo_root_override=tmp_path)
 
-    assert remote_calls == []
+    assert remote_calls
 
 
 def test_rewrite_staging_container_names_for_portainer_avoids_production_name_collisions():
