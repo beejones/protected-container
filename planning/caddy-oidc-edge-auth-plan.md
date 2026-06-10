@@ -1,5 +1,14 @@
 # Plan: Central Caddy OIDC Edge Auth
 
+## Principles
+
+- Caddy is the only public ingress for protected app routes; app containers must not publish direct public host ports.
+- Route protection is a shared proxy contract, not a per-app convention hidden in downstream docs.
+- Basic Auth remains a rollback or break-glass path until the OIDC edge-auth path is staged, validated, and documented as the default.
+- Identity headers are display/audit identity unless paired with a signed, audience-scoped assertion verified by the app.
+- Secrets stay in env files, secret stores, or gateway-managed stores; generated Caddy config and docs must use placeholders or secret references only.
+- Validation evidence must prove both route protection and no-direct-access assumptions before local app auth is relaxed.
+
 ## Overview
 
 Replace the centralized Caddy Basic Auth edge gate with identity-aware protection for every public app route managed by protected-container's central Caddy proxy. Caddy remains the only public TLS and routing entrypoint, but it delegates login, session validation, user approval, and identity proof creation to an auth gateway or identity broker.
@@ -215,7 +224,7 @@ Provider: Google | Microsoft | Facebook
 
 ## Task Overview
 
-- [ ] Phase 0: Cleanup and documentation audit
+- [x] Phase 0: Cleanup and documentation audit
 - [ ] Phase 1: Caddy mechanism investigation and decision record
 - [ ] Phase 2: Auth gateway selection and proof route
 - [ ] Phase 3: Env schema, secrets, user store, and provisioning contract
@@ -227,22 +236,34 @@ Provider: Google | Microsoft | Facebook
 
 ## Phase 0 - Cleanup And Documentation Audit
 
-Follow `.github/skills/code-cleanup/SKILL.md` for the touched deploy/auth modules before implementation.
+Follow `.github/skills/code-cleanup/SKILL.md` and its `code-simplify` / `typed-code-generation` chain for the touched deploy/auth modules before implementation.
 
 ### Tasks
 
-- [ ] Audit Basic Auth references in protected-container docs, env examples, Caddyfile templates, route-registration tests, and downstream shared-routing guidance.
-- [ ] Identify Caddy auth snippets and route-protection checks that should become reusable before adding OIDC branches.
-- [ ] Review docs for any guidance that allows direct app host ports on Ubuntu protected routes.
-- [ ] Identify compose, Docker network, Portainer, and firewall checks that prove app containers are unreachable without passing the Caddy gate.
-- [ ] Record the current Basic Auth behavior as the rollback baseline.
+- [x] Scope the cleanup to central proxy docs, env examples, `docker/proxy/`, `scripts/deploy/caddy_register.py`, env schema/tests, and deploy docs that describe public ingress.
+- [x] Load the cleanup, simplification, typed-code, documentation, security, and test workflows before changing deploy/auth behavior.
+- [x] Audit Basic Auth references in protected-container docs, env examples, Caddyfile templates, route-registration tests, and downstream shared-routing guidance.
+- [x] Identify Caddy auth snippets and route-protection checks that should become reusable before adding OIDC branches.
+- [x] Review docs for any guidance that allows direct app host ports on Ubuntu protected routes.
+- [x] Identify compose, Docker network, Portainer, and firewall checks that prove app containers are unreachable without passing the Caddy gate.
+- [x] Record the current Basic Auth behavior as the rollback baseline.
+
+### Phase 0 Findings
+
+- Basic Auth assumptions that must change are concentrated in `README.md`, `docs/DOCKER.md`, `docs/CODE_SERVER.md`, `docs/deploy/AZURE_CONTAINER.md`, `docs/deploy/ADD_YOUR_APP.md`, `docs/deploy/ENV_SCHEMA.md`, `docs/deploy/SHARED_CADDY_ROUTING.md`, `docs/deploy/UBUNTU_SERVER.md`, `env.example`, `env.secrets.example`, `env.deploy.example`, `docker/proxy/Caddyfile`, Azure YAML rendering helpers, `scripts/deploy/caddy_register.py`, and the Caddy/env schema tests.
+- Reusable route-protection candidates are `SITE_BLOCK_TEMPLATE`, `_site_block_has_basic_auth`, `is_domain_registered`, the `{$PUBLIC_DOMAIN}` placeholder handling, and the protected route in `docker/proxy/Caddyfile`. These should move from Basic-Auth-specific checks to a generic protected-route contract during Phase 4.
+- Direct-port guidance is mostly correct today: Ubuntu docs say only central Caddy binds host ports `80` and `443`, and shared routing docs tell downstream apps not to publish web host ports. Later phases must preserve this guidance and add validation that app stacks expose no public web ports before app-local auth is disabled.
+- Compose/network validation target: proxy compose should still render with only central Caddy publishing `80`/`443`; downstream app compose and Portainer stack inspection should confirm app containers join the external `caddy` network without publishing public web ports.
+- Rollback baseline: generated routes currently use `basic_auth` with `BASIC_AUTH_USER` and `BASIC_AUTH_HASH`; unprotected existing routes are repaired by rewriting them to Basic Auth; placeholder routes are considered healthy only when the placeholder block contains `basic_auth`; env schema keeps `BASIC_AUTH_HASH` as a runtime secret; Ubuntu deploy validates quoted bcrypt hashes; Azure YAML rendering includes one Basic Auth layer for all routes.
+- Baseline validation passed with `source .venv/bin/activate && pytest -q tests/pytests/test_caddy_register.py tests/pytests/test_env_schema.py tests/pytests/test_env_schema_secrets.py` (`21 passed`).
+- `docker compose -f docker/proxy/docker-compose.yml config` rendered successfully, but this command expands `env_file` values into terminal output. Future compose validation should use a redacted/no-secret-output variant and must not paste expanded environment values into reports.
 
 ### Exit Criteria
 
-- [ ] All Basic Auth assumptions that must change are listed.
-- [ ] All direct-port exposure risks are documented or scheduled for correction.
-- [ ] The no-direct-access validation target is known.
-- [ ] Baseline tests and validation commands are known.
+- [x] All Basic Auth assumptions that must change are listed.
+- [x] All direct-port exposure risks are documented or scheduled for correction.
+- [x] The no-direct-access validation target is known.
+- [x] Baseline tests and validation commands are known.
 
 ## Phase 1 - Caddy Mechanism Investigation And Decision Record
 
