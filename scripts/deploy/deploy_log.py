@@ -8,7 +8,8 @@ Newest records are stored directly under the CSV header.
 For a merged git ref, the version log increments APP_VERSION and records that
 version after /changelog has prepared the matching CHANGELOG.md entry. Later
 deploy records for that same git ref reuse the version already recorded in the
-version log.
+version log. Deploys for a git ref that is not already in the log use the
+current APP_VERSION.
 """
 
 from __future__ import annotations
@@ -202,35 +203,6 @@ def _read_existing_deploy_rows(csv_path: Path) -> list[list[str]]:
     return [_normalize_existing_row(row) for row in rows]
 
 
-def _raise_missing_version_record(git_ref: str) -> None:
-    """Fail when deploy is missing a post-merge version row for a git ref."""
-    raise RuntimeError(
-        f"version_log.csv is missing a version row for git ref {git_ref}. "
-        "Run the post-merge version-log command before deploying this git ref."
-    )
-
-
-def require_version_record_for_deploy(
-    *,
-    repo_root: Path,
-    settings: DeployLogSettings,
-    status: str,
-    git_ref: str | None = None,
-    version: str | None = None,
-) -> None:
-    """Validate that deploy will reuse an existing version row."""
-    if not settings.versioning_enabled or version is not None:
-        return
-    csv_path = _resolve_csv_path(repo_root=repo_root, csv_path=settings.csv_path)
-    existing_rows = _read_existing_deploy_rows(csv_path)
-    resolved_git_ref = git_ref if git_ref is not None else _get_git_ref(repo_root)
-    if status != "success":
-        return
-    if _successful_deploy_version_for_git_ref(git_ref=resolved_git_ref, existing_rows=existing_rows):
-        return
-    _raise_missing_version_record(resolved_git_ref)
-
-
 def append_deploy_record(
     *,
     repo_root: Path,
@@ -295,8 +267,6 @@ def append_deploy_record_with_settings(
         )
         if existing_version:
             resolved_version = existing_version
-        elif status == "success":
-            _raise_missing_version_record(resolved_git_ref)
 
     new_row = [
         timestamp,

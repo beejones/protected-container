@@ -9,7 +9,7 @@ description: "Use when: updating CHANGELOG.md, preparing the next APP_VERSION ta
 
 Use this skill from the merge workflow before a PR is created, updated for final review, or merged into `main`. It turns the PR report into release notes, prepares the next app-version changelog entry, records the latest git ref for traceability, and records the models touched by the change.
 
-In `_protected-container`, `/changelog` owns the target version entry in `CHANGELOG.md`; it does **not** bump `.env` before merge. The post-merge version-log command owns the actual `APP_VERSION` bump after the git ref has changed, then records that merged ref in `out/deploy/version_log.csv`. `ubuntu_deploy.py` only verifies and reuses the recorded version for deploys of the same git ref.
+In `_protected-container`, `/changelog` owns the target version entry in `CHANGELOG.md`; it does **not** bump `.env` before merge. The post-merge version-log command owns the actual `APP_VERSION` bump after the git ref has changed, then records that merged ref in `out/deploy/version_log.csv`. `ubuntu_deploy.py` reuses a recorded version for deploys of the same git ref, but a new git ref may deploy with the current `APP_VERSION` without requiring a pre-existing CSV row.
 
 `CHANGELOG.md` is the correct conventional filename for release notes in this repo. Use the root `CHANGELOG.md` file. If it is empty, initialize it with:
 

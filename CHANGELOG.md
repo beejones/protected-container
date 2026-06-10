@@ -11,8 +11,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed Bugs
 
-- Fixed deploy/version workflow timing so successful deploys require a pre-existing version row for the git ref instead of creating the first version row during deploy.
-- Fixed direct deploys after merge so they must reuse the `target=merge` row written by `python scripts/deploy/deploy_log.py --record-merge`.
+- Fixed deploy/version workflow timing so new git refs record the current `APP_VERSION`, while repeated deploys of the same git ref reuse the version already logged for that ref.
+- Fixed direct deploys after merge so they can reuse the `target=merge` row written by `python scripts/deploy/deploy_log.py --record-merge` without requiring every deploy ref to be pre-seeded.
 
 ### Touched Models
 

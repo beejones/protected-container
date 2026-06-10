@@ -176,7 +176,7 @@ source ../../../.venv/bin/activate && python scripts/deploy/deploy_log.py --reco
 git branch -D "$current_branch"
 ```
 
-The post-merge version-log command is mandatory. It increments `.env` `APP_VERSION` to the prepared changelog target only after `git pull` has moved `main` to the merged git ref, then records that ref in `out/deploy/version_log.csv`. If the next deploy uses the same git ref, deploy logging reuses that version instead of treating it as a new version event. If the command fails because `CHANGELOG.md` is missing the target version, fix the changelog and rerun the command before deploying.
+The post-merge version-log command is mandatory. It increments `.env` `APP_VERSION` to the prepared changelog target only after `git pull` has moved `main` to the merged git ref, then records that ref in `out/deploy/version_log.csv`. If the next deploy uses the same git ref, deploy logging reuses that version instead of treating it as a new version event. A deploy of another git ref may still record the current `APP_VERSION`; do not require arbitrary deploy refs to already exist in the CSV. If the command fails because `CHANGELOG.md` is missing the target version, fix the changelog and rerun the command before release bookkeeping continues.
 
 16. Remove the local PR report from `out/PR/` after merge unless the repo workflow explicitly keeps PR reports.
 

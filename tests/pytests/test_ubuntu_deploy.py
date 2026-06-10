@@ -261,7 +261,7 @@ def test_swap_promotes_to_production_stack_and_stops_only_staging(tmp_path, monk
     assert deploy_record_settings[0].csv_path == Path("out/custom/version_log.csv")
 
 
-def test_main_requires_post_merge_version_record_before_remote_work(tmp_path, monkeypatch):
+def test_main_allows_new_git_ref_before_remote_work(tmp_path, monkeypatch):
     (tmp_path / "docker").mkdir()
     (tmp_path / "docker" / "docker-compose.yml").write_text("services: {}\n")
     (tmp_path / "docker" / "docker-compose.ubuntu.yml").write_text("services: {}\n")
@@ -273,11 +273,9 @@ def test_main_requires_post_merge_version_record_before_remote_work(tmp_path, mo
                 "UBUNTU_SSH_HOST=deploy@example.com",
                 "UBUNTU_BUILD_PUSH=false",
                 "PUBLIC_DOMAIN=protected-container.zenia.eu",
-                "STAGING_REMOTE_DIR=/srv/staging",
-                "STAGING_PUBLIC_DOMAIN=staging-protected-container.zenia.eu",
                 "APP_IMAGE=example/app:staged",
+                "PORTAINER_STACK_NAME=protected-container",
                 "PORTAINER_ENDPOINT_ID=1",
-                "STAGING_PORTAINER_STACK_NAME=staging-protected-container",
             ]
         )
         + "\n"
@@ -288,11 +286,9 @@ def test_main_requires_post_merge_version_record_before_remote_work(tmp_path, mo
         "UBUNTU_SSH_HOST",
         "UBUNTU_BUILD_PUSH",
         "PUBLIC_DOMAIN",
-        "STAGING_REMOTE_DIR",
-        "STAGING_PUBLIC_DOMAIN",
         "APP_IMAGE",
+        "PORTAINER_STACK_NAME",
         "PORTAINER_ENDPOINT_ID",
-        "STAGING_PORTAINER_STACK_NAME",
         "PORTAINER_ACCESS_TOKEN",
         "PORTAINER_WEBHOOK_URL",
         "PORTAINER_WEBHOOK_TOKEN",
@@ -308,7 +304,13 @@ def test_main_requires_post_merge_version_record_before_remote_work(tmp_path, mo
 
     def fake_run(cmd, *args, **kwargs):
         remote_calls.append(cmd)
-        raise AssertionError("remote commands should not run before changelog validation")
+
+        class DummyResult:
+            returncode = 0
+            stdout = "hostname 192.168.1.241\n"
+            stderr = ""
+
+        return DummyResult()
 
     def fake_render_compose_stack_content(*, repo_root, compose_files):
         return "services:\n  app:\n    image: example/app:staged\n"
@@ -317,11 +319,16 @@ def test_main_requires_post_merge_version_record_before_remote_work(tmp_path, mo
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.render_compose_stack_content", fake_render_compose_stack_content)
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log._get_git_ref", lambda repo_root: "new-git-ref")
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.subprocess.run", fake_run)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy._run", lambda *args, **kwargs: None)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.is_portainer_access_token_valid", lambda **kwargs: True)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.resolve_portainer_webhook_url_via_api", lambda **kwargs: "")
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.ensure_caddy_registration", lambda **kwargs: None)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.is_domain_registered", lambda **kwargs: True)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log.append_deploy_record_with_settings", lambda **kwargs: tmp_path / "version_log.csv")
 
-    with pytest.raises(RuntimeError, match="post-merge version-log command"):
-        main([], repo_root_override=tmp_path)
+    main(["--prod", "--skip-build-push"], repo_root_override=tmp_path)
 
-    assert remote_calls == []
+    assert ["ssh", "deploy@example.com", "echo SSH_OK"] in remote_calls
 
 
 def test_rewrite_staging_container_names_for_portainer_avoids_production_name_collisions():
@@ -467,7 +474,6 @@ def test_main_refreshes_central_proxy_even_when_container_exists(tmp_path, monke
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.resolve_portainer_webhook_url_via_api", lambda **kwargs: "")
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.ensure_caddy_registration", lambda **kwargs: None)
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.is_domain_registered", lambda **kwargs: True)
-    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log.require_version_record_for_deploy", lambda **kwargs: None)
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log.append_deploy_record_with_settings", lambda **kwargs: tmp_path / "version_log.csv")
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log._read_app_version", lambda repo_root: "1.2.3")
 

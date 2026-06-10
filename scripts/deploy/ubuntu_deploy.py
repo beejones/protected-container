@@ -1018,11 +1018,6 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     hooks.call("configure_deploy_log", hook_ctx, hook_plan, deploy_log_settings)
     if not deploy_log_settings.versioning_enabled:
         log_info("Deploy log versioning disabled by deploy hook.", icon="🪝")
-    deploy_log.require_version_record_for_deploy(
-        repo_root=repo_root,
-        settings=deploy_log_settings,
-        status="success",
-    )
 
     log_step(f"Prepared deployment plan [{deploy_target.upper()}]", icon="🧭")
     log_info(f"Target environment: {deploy_target}")

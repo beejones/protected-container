@@ -58,7 +58,7 @@ Staging is the default target:
 source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py
 ```
 
-This deploys using `STAGING_*` overrides for domain, remote dir, and stack name. Containers are **created and then stopped via Portainer API**. All other settings (SSH host, compose files, hooks) are shared. Successful deploys require a version row for the current git ref; after merge, run the version-log command so deploys can reuse the recorded version.
+This deploys using `STAGING_*` overrides for domain, remote dir, and stack name. Containers are **created and then stopped via Portainer API**. All other settings (SSH host, compose files, hooks) are shared. New git refs deploy with the current `APP_VERSION`; repeated deploys of the same git ref reuse the logged version.
 
 ## Deploy to Production
 
@@ -68,7 +68,7 @@ Pass `--prod` to target production:
 source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py --prod
 ```
 
-This updates and starts production containers, then stops any staging containers. Successful deploys require a version row for the current git ref; repeated deploys of the same git ref reuse the logged version.
+This updates and starts production containers, then stops any staging containers. New git refs deploy with the current `APP_VERSION`; repeated deploys of the same git ref reuse the logged version.
 
 ## Promote Staging to Production
 
@@ -104,7 +104,7 @@ Every deploy writes a row to `out/deploy/version_log.csv`. The latest record app
 | `image` | Container image deployed |
 | `status` | `success` / `failed` |
 
-`APP_VERSION` is recorded in the `version` column for every deploy. Successful deploys require an existing version row for the current git ref; they do not create the first version row. Later staging, production, or swap records for the same git ref reuse the version already recorded for that git ref. Failed deploys never change `APP_VERSION`.
+`APP_VERSION` is recorded in the `version` column for every deploy. If the current git ref already has a successful row, later staging, production, or swap records for that same git ref reuse the version already recorded for that git ref. If the git ref has no successful row yet, the deploy records the current `APP_VERSION`. Failed deploys never change `APP_VERSION`.
 
 The merge workflow records the merged git ref first:
 
