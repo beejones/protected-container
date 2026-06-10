@@ -12,6 +12,7 @@ from scripts.deploy.env_schema import (
     VarsEnum,
     apply_defaults,
     parse_dotenv_file,
+    resolve_auth_approver_email,
     truthy,
     validate_cross_field_rules,
     validate_known_keys,
@@ -102,3 +103,104 @@ def test_cross_field_rules_require_ghcr_creds(tmp_path: Path) -> None:
         SecretsEnum.GHCR_TOKEN.value: "tok",
     }
     validate_cross_field_rules(deploy_kv=kv2, context="deploy")
+
+
+def test_oidc_edge_auth_defaults_keep_basic_auth_rollback_valid() -> None:
+    kv = apply_defaults(DEPLOY_SCHEMA, {})
+
+    assert kv[VarsEnum.EDGE_AUTH_MODE.value] == "basic"
+    assert kv[VarsEnum.EDGE_AUTH_GATEWAY.value] == "authentik"
+    assert kv[VarsEnum.EDGE_AUTH_GATEWAY_SERVICE.value] == "authentik-outpost"
+    assert kv[VarsEnum.EDGE_AUTH_VERIFY_URI.value] == "/outpost.goauthentik.io/auth/caddy"
+    validate_cross_field_rules(deploy_kv=kv, context="deploy")
+
+
+def test_oidc_edge_auth_requires_authentik_secrets_and_domain() -> None:
+    kv = apply_defaults(
+        DEPLOY_SCHEMA,
+        {
+            VarsEnum.EDGE_AUTH_MODE.value: "oidc",
+            VarsEnum.ACME_EMAIL.value: "ops@example.com",
+        },
+    )
+
+    with pytest.raises(EnvValidationError) as excinfo:
+        validate_cross_field_rules(deploy_kv=kv, context="deploy")
+
+    message = str(excinfo.value)
+    assert VarsEnum.AUTHENTIK_PUBLIC_DOMAIN.value in message
+    assert SecretsEnum.AUTHENTIK_SECRET_KEY.value in message
+    assert SecretsEnum.AUTHENTIK_POSTGRESQL__PASSWORD.value in message
+
+
+def test_oidc_edge_auth_accepts_minimal_authentik_contract() -> None:
+    kv = apply_defaults(
+        DEPLOY_SCHEMA,
+        {
+            VarsEnum.EDGE_AUTH_MODE.value: "oidc",
+            VarsEnum.ACME_EMAIL.value: "ops@example.com",
+            VarsEnum.AUTHENTIK_PUBLIC_DOMAIN.value: "auth.example.com",
+            SecretsEnum.AUTHENTIK_SECRET_KEY.value: "secret-key",
+            SecretsEnum.AUTHENTIK_POSTGRESQL__PASSWORD.value: "postgres-password",
+        },
+    )
+
+    validate_cross_field_rules(deploy_kv=kv, context="deploy")
+    assert resolve_auth_approver_email(deploy_kv=kv) == "ops@example.com"
+
+
+def test_oidc_edge_auth_validates_modes_and_proof_levels() -> None:
+    kv = apply_defaults(
+        DEPLOY_SCHEMA,
+        {
+            VarsEnum.EDGE_AUTH_MODE.value: "saml",
+            VarsEnum.EDGE_AUTH_GATEWAY.value: "custom",
+            VarsEnum.EDGE_AUTH_DEFAULT_PROOF_LEVEL.value: "jwt",
+            VarsEnum.AUTH_PROOF_LEVEL.value: "cookie",
+        },
+    )
+
+    with pytest.raises(EnvValidationError) as excinfo:
+        validate_cross_field_rules(deploy_kv=kv, context="deploy")
+
+    message = str(excinfo.value)
+    assert VarsEnum.EDGE_AUTH_MODE.value in message
+    assert VarsEnum.EDGE_AUTH_GATEWAY.value in message
+    assert VarsEnum.EDGE_AUTH_DEFAULT_PROOF_LEVEL.value in message
+    assert VarsEnum.AUTH_PROOF_LEVEL.value in message
+
+
+def test_oidc_signed_token_default_requires_issuer() -> None:
+    kv = apply_defaults(
+        DEPLOY_SCHEMA,
+        {
+            VarsEnum.EDGE_AUTH_MODE.value: "oidc",
+            VarsEnum.EDGE_AUTH_DEFAULT_PROOF_LEVEL.value: "signed_token",
+            VarsEnum.ACME_EMAIL.value: "ops@example.com",
+            VarsEnum.AUTHENTIK_PUBLIC_DOMAIN.value: "auth.example.com",
+            SecretsEnum.AUTHENTIK_SECRET_KEY.value: "secret-key",
+            SecretsEnum.AUTHENTIK_POSTGRESQL__PASSWORD.value: "postgres-password",
+        },
+    )
+
+    with pytest.raises(EnvValidationError) as excinfo:
+        validate_cross_field_rules(deploy_kv=kv, context="deploy")
+
+    assert VarsEnum.EDGE_AUTH_TOKEN_ISSUER.value in str(excinfo.value)
+
+
+def test_oidc_provider_client_ids_and_secrets_must_be_paired() -> None:
+    kv = apply_defaults(
+        DEPLOY_SCHEMA,
+        {
+            VarsEnum.AUTHENTIK_GOOGLE_CLIENT_ID.value: "google-client-id",
+            SecretsEnum.AUTHENTIK_MICROSOFT_CLIENT_SECRET.value: "microsoft-secret",
+        },
+    )
+
+    with pytest.raises(EnvValidationError) as excinfo:
+        validate_cross_field_rules(deploy_kv=kv, context="deploy")
+
+    message = str(excinfo.value)
+    assert SecretsEnum.AUTHENTIK_GOOGLE_CLIENT_SECRET.value in message
+    assert VarsEnum.AUTHENTIK_MICROSOFT_CLIENT_ID.value in message

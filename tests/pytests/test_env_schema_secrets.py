@@ -2,6 +2,8 @@ from __future__ import annotations
 from pathlib import Path
 import pytest
 from scripts.deploy.env_schema import (
+    DEPLOY_SCHEMA,
+    EnvTarget,
     RUNTIME_SCHEMA,
     SECRETS_SCHEMA,
     EnvValidationError,
@@ -20,11 +22,22 @@ def test_secrets_schema_keys_not_in_runtime_schema() -> None:
     """Verify separate schemas have distinct keys."""
     runtime_keys = {spec.key for spec in RUNTIME_SCHEMA}
     secrets_keys = {spec.key for spec in SECRETS_SCHEMA}
+    deploy_secret_keys = {
+        spec.key
+        for spec in DEPLOY_SCHEMA
+        if EnvTarget.DOTENV_DEPLOY_SECRETS in spec.targets
+    }
     
     assert SecretsEnum.BASIC_AUTH_HASH in secrets_keys
     assert SecretsEnum.BASIC_AUTH_HASH not in runtime_keys
     assert SecretsEnum.APP_SECRET in secrets_keys
     assert SecretsEnum.APP_SECRET not in runtime_keys
+    assert SecretsEnum.AUTHENTIK_SECRET_KEY not in runtime_keys
+    assert SecretsEnum.AUTHENTIK_POSTGRESQL__PASSWORD not in runtime_keys
+    assert SecretsEnum.AUTHENTIK_BOOTSTRAP_TOKEN not in runtime_keys
+    assert SecretsEnum.AUTHENTIK_SECRET_KEY in deploy_secret_keys
+    assert SecretsEnum.AUTHENTIK_POSTGRESQL__PASSWORD in deploy_secret_keys
+    assert SecretsEnum.AUTHENTIK_BOOTSTRAP_TOKEN in deploy_secret_keys
 
 def test_secrets_schema_validation(tmp_path: Path) -> None:
     """Validate .env.secrets content against SECRETS_SCHEMA."""

@@ -86,6 +86,41 @@ class VarsEnum(str, Enum):
     BASIC_AUTH_USER = "BASIC_AUTH_USER"
     APP_VERSION = "APP_VERSION"
 
+    # Central edge auth / Authentik proxy gateway
+    EDGE_AUTH_MODE = "EDGE_AUTH_MODE"
+    EDGE_AUTH_GATEWAY = "EDGE_AUTH_GATEWAY"
+    EDGE_AUTH_GATEWAY_SERVICE = "EDGE_AUTH_GATEWAY_SERVICE"
+    EDGE_AUTH_GATEWAY_PORT = "EDGE_AUTH_GATEWAY_PORT"
+    EDGE_AUTH_VERIFY_URI = "EDGE_AUTH_VERIFY_URI"
+    EDGE_AUTH_COPY_HEADERS = "EDGE_AUTH_COPY_HEADERS"
+    EDGE_AUTH_TOKEN_HEADER = "EDGE_AUTH_TOKEN_HEADER"
+    EDGE_AUTH_DEFAULT_PROOF_LEVEL = "EDGE_AUTH_DEFAULT_PROOF_LEVEL"
+    EDGE_AUTH_TOKEN_ISSUER = "EDGE_AUTH_TOKEN_ISSUER"
+    AUTH_APPROVER_EMAIL = "AUTH_APPROVER_EMAIL"
+    AUTH_AUDIENCE = "AUTH_AUDIENCE"
+    AUTH_POLICY = "AUTH_POLICY"
+    AUTH_PROOF_LEVEL = "AUTH_PROOF_LEVEL"
+    AUTH_SECRET_REF = "AUTH_SECRET_REF"
+    AUTHENTIK_PUBLIC_DOMAIN = "AUTHENTIK_PUBLIC_DOMAIN"
+    AUTHENTIK_OUTPOST_SERVICE = "AUTHENTIK_OUTPOST_SERVICE"
+    AUTHENTIK_POSTGRESQL__HOST = "AUTHENTIK_POSTGRESQL__HOST"
+    AUTHENTIK_POSTGRESQL__PORT = "AUTHENTIK_POSTGRESQL__PORT"
+    AUTHENTIK_POSTGRESQL__NAME = "AUTHENTIK_POSTGRESQL__NAME"
+    AUTHENTIK_POSTGRESQL__USER = "AUTHENTIK_POSTGRESQL__USER"
+    AUTHENTIK_STORAGE__BACKEND = "AUTHENTIK_STORAGE__BACKEND"
+    AUTHENTIK_BACKUP_DIR = "AUTHENTIK_BACKUP_DIR"
+    AUTHENTIK_EMAIL__HOST = "AUTHENTIK_EMAIL__HOST"
+    AUTHENTIK_EMAIL__PORT = "AUTHENTIK_EMAIL__PORT"
+    AUTHENTIK_EMAIL__USERNAME = "AUTHENTIK_EMAIL__USERNAME"
+    AUTHENTIK_EMAIL__FROM = "AUTHENTIK_EMAIL__FROM"
+    AUTHENTIK_EMAIL__USE_TLS = "AUTHENTIK_EMAIL__USE_TLS"
+    AUTHENTIK_EMAIL__USE_SSL = "AUTHENTIK_EMAIL__USE_SSL"
+    AUTHENTIK_BOOTSTRAP_EMAIL = "AUTHENTIK_BOOTSTRAP_EMAIL"
+    AUTHENTIK_GOOGLE_CLIENT_ID = "AUTHENTIK_GOOGLE_CLIENT_ID"
+    AUTHENTIK_MICROSOFT_CLIENT_ID = "AUTHENTIK_MICROSOFT_CLIENT_ID"
+    AUTHENTIK_FACEBOOK_CLIENT_ID = "AUTHENTIK_FACEBOOK_CLIENT_ID"
+    AUTHENTIK_SIGNING_KEY_REF = "AUTHENTIK_SIGNING_KEY_REF"
+
     # Storage-manager sidecar (consumed by docker/storage-manager compose via
     # ${SM_*:-default}; shipped in env.example, so the runtime schema must know them)
     SM_CHECK_INTERVAL_SECONDS = "SM_CHECK_INTERVAL_SECONDS"
@@ -103,6 +138,17 @@ class SecretsEnum(str, Enum):
 
     # App/runtime secret (optional; user-defined)
     APP_SECRET = "APP_SECRET"
+
+    # Authentik / central edge auth secrets
+    AUTHENTIK_SECRET_KEY = "AUTHENTIK_SECRET_KEY"
+    AUTHENTIK_POSTGRESQL__PASSWORD = "AUTHENTIK_POSTGRESQL__PASSWORD"
+    AUTHENTIK_BOOTSTRAP_PASSWORD_HASH = "AUTHENTIK_BOOTSTRAP_PASSWORD_HASH"
+    AUTHENTIK_BOOTSTRAP_TOKEN = "AUTHENTIK_BOOTSTRAP_TOKEN"
+    AUTHENTIK_API_TOKEN = "AUTHENTIK_API_TOKEN"
+    AUTHENTIK_EMAIL__PASSWORD = "AUTHENTIK_EMAIL__PASSWORD"
+    AUTHENTIK_GOOGLE_CLIENT_SECRET = "AUTHENTIK_GOOGLE_CLIENT_SECRET"
+    AUTHENTIK_MICROSOFT_CLIENT_SECRET = "AUTHENTIK_MICROSOFT_CLIENT_SECRET"
+    AUTHENTIK_FACEBOOK_CLIENT_SECRET = "AUTHENTIK_FACEBOOK_CLIENT_SECRET"
 
     # GitHub Actions meta-secret (not a container env var, but required by CI wiring)
     RUNTIME_ENV_DOTENV = "RUNTIME_ENV_DOTENV"
@@ -136,6 +182,10 @@ DERIVED_DEPLOY_ENV_KEYS: frozenset[str] = frozenset(
         VarsEnum.AZURE_OIDC_APP_NAME.value,
     }
 )
+
+EDGE_AUTH_MODES: frozenset[str] = frozenset({"basic", "oidc", "public"})
+EDGE_AUTH_GATEWAYS: frozenset[str] = frozenset({"authentik"})
+AUTH_PROOF_LEVELS: frozenset[str] = frozenset({"headers", "signed_token"})
 
 
 def get_derived_deploy_env_overrides(
@@ -369,6 +419,249 @@ DEPLOY_SCHEMA: tuple[EnvKeySpec, ...] = (
         mandatory=False,
         targets=frozenset({EnvTarget.GH_ACTIONS_SECRET}),
     ),
+    EnvKeySpec(
+        key=VarsEnum.EDGE_AUTH_MODE,
+        mandatory=False,
+        default="basic",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.EDGE_AUTH_GATEWAY,
+        mandatory=False,
+        default="authentik",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.EDGE_AUTH_GATEWAY_SERVICE,
+        mandatory=False,
+        default="authentik-outpost",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.EDGE_AUTH_GATEWAY_PORT,
+        mandatory=False,
+        default="9000",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.EDGE_AUTH_VERIFY_URI,
+        mandatory=False,
+        default="/outpost.goauthentik.io/auth/caddy",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.EDGE_AUTH_COPY_HEADERS,
+        mandatory=False,
+        default="X-authentik-username>X-Auth-User,X-authentik-email>X-Auth-Email,X-authentik-groups>X-Auth-Groups,X-Authentik-Jwt>X-Auth-Token",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.EDGE_AUTH_TOKEN_HEADER,
+        mandatory=False,
+        default="X-Auth-Token",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.EDGE_AUTH_DEFAULT_PROOF_LEVEL,
+        mandatory=False,
+        default="headers",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.EDGE_AUTH_TOKEN_ISSUER,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTH_APPROVER_EMAIL,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTH_AUDIENCE,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTH_POLICY,
+        mandatory=False,
+        default="protected-container-users",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTH_PROOF_LEVEL,
+        mandatory=False,
+        default="headers",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTH_SECRET_REF,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_PUBLIC_DOMAIN,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_OUTPOST_SERVICE,
+        mandatory=False,
+        default="authentik-outpost",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_POSTGRESQL__HOST,
+        mandatory=False,
+        default="authentik-postgresql",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_POSTGRESQL__PORT,
+        mandatory=False,
+        default="5432",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_POSTGRESQL__NAME,
+        mandatory=False,
+        default="authentik",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_POSTGRESQL__USER,
+        mandatory=False,
+        default="authentik",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_STORAGE__BACKEND,
+        mandatory=False,
+        default="file",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_BACKUP_DIR,
+        mandatory=False,
+        default="backups/authentik",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_EMAIL__HOST,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_EMAIL__PORT,
+        mandatory=False,
+        default="587",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_EMAIL__USERNAME,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_EMAIL__FROM,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_EMAIL__USE_TLS,
+        mandatory=False,
+        default="true",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_EMAIL__USE_SSL,
+        mandatory=False,
+        default="false",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_BOOTSTRAP_EMAIL,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_GOOGLE_CLIENT_ID,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_MICROSOFT_CLIENT_ID,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_FACEBOOK_CLIENT_ID,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.AUTHENTIK_SIGNING_KEY_REF,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=SecretsEnum.AUTHENTIK_SECRET_KEY,
+        mandatory=False,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY_SECRETS, EnvTarget.GH_ACTIONS_SECRET}),
+    ),
+    EnvKeySpec(
+        key=SecretsEnum.AUTHENTIK_POSTGRESQL__PASSWORD,
+        mandatory=False,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY_SECRETS, EnvTarget.GH_ACTIONS_SECRET}),
+    ),
+    EnvKeySpec(
+        key=SecretsEnum.AUTHENTIK_BOOTSTRAP_PASSWORD_HASH,
+        mandatory=False,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY_SECRETS, EnvTarget.GH_ACTIONS_SECRET}),
+    ),
+    EnvKeySpec(
+        key=SecretsEnum.AUTHENTIK_BOOTSTRAP_TOKEN,
+        mandatory=False,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY_SECRETS, EnvTarget.GH_ACTIONS_SECRET}),
+    ),
+    EnvKeySpec(
+        key=SecretsEnum.AUTHENTIK_API_TOKEN,
+        mandatory=False,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY_SECRETS, EnvTarget.GH_ACTIONS_SECRET}),
+    ),
+    EnvKeySpec(
+        key=SecretsEnum.AUTHENTIK_EMAIL__PASSWORD,
+        mandatory=False,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY_SECRETS, EnvTarget.GH_ACTIONS_SECRET}),
+    ),
+    EnvKeySpec(
+        key=SecretsEnum.AUTHENTIK_GOOGLE_CLIENT_SECRET,
+        mandatory=False,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY_SECRETS, EnvTarget.GH_ACTIONS_SECRET}),
+    ),
+    EnvKeySpec(
+        key=SecretsEnum.AUTHENTIK_MICROSOFT_CLIENT_SECRET,
+        mandatory=False,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY_SECRETS, EnvTarget.GH_ACTIONS_SECRET}),
+    ),
+    EnvKeySpec(
+        key=SecretsEnum.AUTHENTIK_FACEBOOK_CLIENT_SECRET,
+        mandatory=False,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY_SECRETS, EnvTarget.GH_ACTIONS_SECRET}),
+    ),
     # Staging (optional)
     EnvKeySpec(
         key=VarsEnum.STAGING_PUBLIC_DOMAIN,
@@ -521,9 +814,80 @@ def truthy(val: str | None) -> bool:
     return v in {"1", "true", "yes", "y", "on"}
 
 
+def resolve_auth_approver_email(*, deploy_kv: Mapping[str, str]) -> str:
+    explicit_email = str(deploy_kv.get(VarsEnum.AUTH_APPROVER_EMAIL.value) or "").strip()
+    if explicit_email:
+        return explicit_email
+    return str(deploy_kv.get(VarsEnum.ACME_EMAIL.value) or "").strip()
+
+
+def _append_invalid_choice_problem(
+    *,
+    problems: list[str],
+    key: VarsEnum,
+    value: str | None,
+    allowed_values: frozenset[str],
+) -> None:
+    raw_value = str(value or "").strip()
+    if not raw_value or raw_value in allowed_values:
+        return
+    allowed = ", ".join(sorted(allowed_values))
+    problems.append(f"{key.value} must be one of: {allowed}")
+
+
+def _append_missing_problem(*, problems: list[str], deploy_kv: Mapping[str, str], key: VarsEnum | SecretsEnum) -> None:
+    if not str(deploy_kv.get(key.value) or "").strip():
+        problems.append(f"{key.value} is required when {VarsEnum.EDGE_AUTH_MODE.value}=oidc")
+
+
+def _append_provider_pair_problem(
+    *,
+    problems: list[str],
+    deploy_kv: Mapping[str, str],
+    client_id_key: VarsEnum,
+    client_secret_key: SecretsEnum,
+) -> None:
+    has_client_id = bool(str(deploy_kv.get(client_id_key.value) or "").strip())
+    has_client_secret = bool(str(deploy_kv.get(client_secret_key.value) or "").strip())
+    if has_client_id and not has_client_secret:
+        problems.append(f"{client_secret_key.value} is required when {client_id_key.value} is set")
+    if has_client_secret and not has_client_id:
+        problems.append(f"{client_id_key.value} is required when {client_secret_key.value} is set")
+
+
 def validate_cross_field_rules(*, deploy_kv: Mapping[str, str], context: str) -> None:
     """Extra validation for rules that can't be expressed with (mandatory/default) alone."""
     problems: list[str] = []
+
+    edge_auth_mode = str(deploy_kv.get(VarsEnum.EDGE_AUTH_MODE.value) or "basic").strip()
+    edge_auth_gateway = str(deploy_kv.get(VarsEnum.EDGE_AUTH_GATEWAY.value) or "authentik").strip()
+    default_proof_level = str(deploy_kv.get(VarsEnum.EDGE_AUTH_DEFAULT_PROOF_LEVEL.value) or "headers").strip()
+    app_proof_level = str(deploy_kv.get(VarsEnum.AUTH_PROOF_LEVEL.value) or "headers").strip()
+
+    _append_invalid_choice_problem(
+        problems=problems,
+        key=VarsEnum.EDGE_AUTH_MODE,
+        value=edge_auth_mode,
+        allowed_values=EDGE_AUTH_MODES,
+    )
+    _append_invalid_choice_problem(
+        problems=problems,
+        key=VarsEnum.EDGE_AUTH_GATEWAY,
+        value=edge_auth_gateway,
+        allowed_values=EDGE_AUTH_GATEWAYS,
+    )
+    _append_invalid_choice_problem(
+        problems=problems,
+        key=VarsEnum.EDGE_AUTH_DEFAULT_PROOF_LEVEL,
+        value=default_proof_level,
+        allowed_values=AUTH_PROOF_LEVELS,
+    )
+    _append_invalid_choice_problem(
+        problems=problems,
+        key=VarsEnum.AUTH_PROOF_LEVEL,
+        value=app_proof_level,
+        allowed_values=AUTH_PROOF_LEVELS,
+    )
 
     if truthy(deploy_kv.get(VarsEnum.GHCR_PRIVATE.value)):
         # For private GHCR images, username+token are required for ACI pull.
@@ -531,6 +895,38 @@ def validate_cross_field_rules(*, deploy_kv: Mapping[str, str], context: str) ->
             problems.append(f"{VarsEnum.GHCR_USERNAME.value} is required when {VarsEnum.GHCR_PRIVATE.value}=true")
         if not str(deploy_kv.get(SecretsEnum.GHCR_TOKEN.value) or "").strip():
             problems.append(f"{SecretsEnum.GHCR_TOKEN.value} is required when {VarsEnum.GHCR_PRIVATE.value}=true")
+
+    if edge_auth_mode == "oidc":
+        _append_missing_problem(problems=problems, deploy_kv=deploy_kv, key=VarsEnum.AUTHENTIK_PUBLIC_DOMAIN)
+        _append_missing_problem(problems=problems, deploy_kv=deploy_kv, key=SecretsEnum.AUTHENTIK_SECRET_KEY)
+        _append_missing_problem(problems=problems, deploy_kv=deploy_kv, key=SecretsEnum.AUTHENTIK_POSTGRESQL__PASSWORD)
+        if not resolve_auth_approver_email(deploy_kv=deploy_kv):
+            problems.append(
+                f"{VarsEnum.AUTH_APPROVER_EMAIL.value} or {VarsEnum.ACME_EMAIL.value} is required when {VarsEnum.EDGE_AUTH_MODE.value}=oidc"
+            )
+        if default_proof_level == "signed_token" and not str(deploy_kv.get(VarsEnum.EDGE_AUTH_TOKEN_ISSUER.value) or "").strip():
+            problems.append(
+                f"{VarsEnum.EDGE_AUTH_TOKEN_ISSUER.value} is required when {VarsEnum.EDGE_AUTH_DEFAULT_PROOF_LEVEL.value}=signed_token"
+            )
+
+    _append_provider_pair_problem(
+        problems=problems,
+        deploy_kv=deploy_kv,
+        client_id_key=VarsEnum.AUTHENTIK_GOOGLE_CLIENT_ID,
+        client_secret_key=SecretsEnum.AUTHENTIK_GOOGLE_CLIENT_SECRET,
+    )
+    _append_provider_pair_problem(
+        problems=problems,
+        deploy_kv=deploy_kv,
+        client_id_key=VarsEnum.AUTHENTIK_MICROSOFT_CLIENT_ID,
+        client_secret_key=SecretsEnum.AUTHENTIK_MICROSOFT_CLIENT_SECRET,
+    )
+    _append_provider_pair_problem(
+        problems=problems,
+        deploy_kv=deploy_kv,
+        client_id_key=VarsEnum.AUTHENTIK_FACEBOOK_CLIENT_ID,
+        client_secret_key=SecretsEnum.AUTHENTIK_FACEBOOK_CLIENT_SECRET,
+    )
 
     if problems:
         raise EnvValidationError(context=context, problems=problems)
