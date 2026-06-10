@@ -327,26 +327,93 @@ Status: accepted for implementation planning on 2026-06-10.
 
 ### Tasks
 
-- [ ] Compare popular maintained options first: Authentik, Authelia, Keycloak, and OAuth2 Proxy. Only include custom Caddy plugin or custom assertion service if maintained options cannot satisfy the proof contract.
-- [ ] Compare each option against Google/Microsoft/Facebook support, Caddy `forward_auth`, access-request UX, database or file-backed user store, groups/allowlists, provisioning API, signed assertions, per-app audience support, Docker Compose operation, persistence, and rollback complexity.
-- [ ] Verify whether Facebook will be configured as OIDC or social OAuth through the selected gateway.
+- [x] Compare popular maintained options first: Authentik, Authelia, Keycloak, and OAuth2 Proxy. Only include custom Caddy plugin or custom assertion service if maintained options cannot satisfy the proof contract.
+- [x] Compare each option against Google/Microsoft/Facebook support, Caddy `forward_auth`, access-request UX, database or file-backed user store, groups/allowlists, provisioning API, signed assertions, per-app audience support, Docker Compose operation, persistence, and rollback complexity.
+- [x] Verify whether Facebook will be configured as OIDC or social OAuth through the selected gateway.
 - [ ] Build a staging proof route that uses Caddy `forward_auth`, returns identity headers, and returns a signed token for Level 2 proof.
 - [ ] Verify the proof route blocks anonymous users, denies unauthorized users, and allows approved users.
-- [ ] Verify where approved users live for the selected option and how backups/restores work.
-- [ ] Verify whether the selected option can send access-granted notifications or whether protected-container must provide a simple notification script/manual runbook.
+- [x] Verify where approved users live for the selected option and how backups/restores work.
+- [x] Verify whether the selected option can send access-granted notifications or whether protected-container must provide a simple notification script/manual runbook.
+
+### Phase 2 Decision Record
+
+Status: Authentik selected for implementation planning on 2026-06-10; staging proof-route installation and live auth validation remain pending before Phase 3 starts.
+
+Select Authentik as the central auth gateway/broker for the first OIDC edge-auth rollout. It is the best fit for this repository because it combines a documented Caddy `forward_auth` proxy-provider integration, social/OIDC source brokerage, application/group/policy authorization, durable user and session storage, OpenAPI-backed provisioning, invitation/enrollment flows, email-capable onboarding, and proxy headers that include both identity fields and Authentik-issued JWT/JWKS metadata. This keeps Caddy stock and avoids adding a custom Caddy image, while still giving downstream apps a Level 2 signed-token path.
+
+Use one Authentik proxy provider per protected app when the app needs distinct policy, group binding, audience, or proof behavior. Authentik's domain-level forward-auth mode is useful for broad shared protection under one parent domain, but its docs state that it cannot enforce different application-level authorization rules for each protected application. The protected-container route-registration contract should therefore default to single-application forward-auth providers for app-specific authorization.
+
+Facebook should be configured as an Authentik social/OAuth source, not as a downstream app OIDC provider. Google and Microsoft also belong behind Authentik as sources/identity providers. Protected apps then integrate with the central edge contract instead of each app directly brokering Google, Microsoft, or Facebook.
+
+Approved users live in Authentik's user/group/application binding model backed by Authentik's PostgreSQL database. Authentik requires PostgreSQL for application data, configuration, sessions, and background task coordination, and its docs point backup/restore operations at the Authentik/PostgreSQL backup guidance. Phase 3 should model this as proxy-stack-owned Authentik/PostgreSQL persistence with explicit backup paths, not Caddyfile state.
+
+Use Authentik groups/application bindings as the first approval mechanism. Operators can pre-provision users or groups through Authentik's Admin UI or API, and protected-container should add `scripts/deploy/auth_users.py` as a wrapper around the Authentik API for repeatable `list`, `add`, `remove`, `sync`, and `--dry-run` flows. New-user self-service should not grant app access automatically: invitation/enrollment flows can create users and assign groups, but protected-container must bind app access only to approved groups or policies.
+
+For access-request UX, keep the durable contract independent of Authentik internals: unauthenticated users follow Authentik login; authenticated-but-unapproved users should land on a request-access page or denial flow that emails or instructs the operator at `AUTH_APPROVER_EMAIL`. Authentik can send invitation and recovery emails when SMTP is configured, and can send invitation emails from the Admin UI. If the exact access-granted notification cannot be expressed cleanly through Authentik events/flows in Phase 6, protected-container should provide a simple operator notification script or runbook rather than blocking the gateway selection.
+
+Keep Basic Auth rollback mode until the Authentik proof route is deployed and validated in staging. Rollback means generated routes can still render the existing Basic Auth guard and `BASIC_AUTH_HASH` remains a valid secret while `EDGE_AUTH_MODE=basic` is supported.
+
+### Phase 2 Gateway Comparison
+
+| Option | Decision | Fit Against Requirements |
+| --- | --- | --- |
+| Authentik | Selected | Documented Caddy proxy-provider `forward_auth`; supports forward-auth single-app mode for per-app authorization; supports social/OAuth and OIDC sources; has users, groups, application bindings, policies, invitations, email settings, OpenAPI, PostgreSQL-backed persistence, proxy identity headers, and Authentik JWT/JWKS metadata headers. |
+| Keycloak | Strong fallback, not first rollout | Excellent identity broker, social providers, roles/groups, organizations, Admin API/CLI, signed OIDC tokens, JWKS, and audience controls. It lacks a native Caddy `forward_auth`/outpost integration in the docs gathered, so it would require OAuth2 Proxy or a custom adapter before Caddy can use it as an edge pre-auth gateway. |
+| Authelia | Rejected for this goal | Good Caddy `forward_auth`, access control, and file-backed/local identity options, but its OIDC provider docs state that it does not support the OIDC relying-party role. That means it cannot natively broker Google/Microsoft/Facebook login as the central social-login gateway. |
+| OAuth2 Proxy | Rejected as primary broker | Good Caddy-adjacent auth-request pattern, many providers, groups/email allowlists, and simple Docker operation. It is weaker for durable user approval, invitations, access-request workflow, provisioning, and multiple-provider governance; docs note multiple providers are incomplete. |
+| Maintained gateway plus custom assertion service | Deferred fallback | Could preserve a popular gateway while adding app-specific assertions if Authentik's JWT/JWKS headers cannot satisfy Level 2 in staging. Adds code and key-management ownership, so do not build unless the proof-route test fails. |
+| Custom Caddy plugin | Rejected for first rollout | Would move signing/key handling into Caddy and require a custom image, plugin review, pinning, and long-term maintenance. Phase 1 already established that Caddy should not become the token issuer. |
+
+### Phase 2 Proof-Route Target
+
+The staging proof route should use this selected shape:
+
+```caddy
+(protected_auth) {
+    request_header -X-Auth-User
+    request_header -X-Auth-Email
+    request_header -X-Auth-Groups
+    request_header -X-Auth-Token
+
+    forward_auth authentik-outpost:9000 {
+        uri /outpost.goauthentik.io/auth/caddy
+        copy_headers {
+            X-authentik-username>X-Auth-User
+            X-authentik-email>X-Auth-Email
+            X-authentik-groups>X-Auth-Groups
+            X-Authentik-Jwt>X-Auth-Token
+        }
+    }
+}
+```
+
+The exact outpost service name, auth host, copied header casing, trusted proxy settings, and public callback paths must be verified against the generated Authentik provider/outpost configuration during staging. Caddy must continue to strip all incoming `X-Auth-*` headers before calling Authentik.
+
+### Phase 2 Source Evidence
+
+- Authentik proxy provider docs confirm proxy mode, forward-auth single-application mode, forward-auth domain-level mode, `/outpost.goauthentik.io/auth/caddy`, user identity headers, application metadata headers, logout behavior, unauthenticated paths, and HTTP/HTTPS outpost listeners on `9000`/`9443`.
+- Authentik Caddy integration docs show Caddy `forward_auth` against the outpost and copied headers including user, email, groups, name, UID, JWT, and JWKS metadata.
+- Authentik OAuth2/OIDC provider docs confirm Authentik can act as an OIDC provider, exposes OAuth2/OIDC endpoints and JWKS, signs JWTs, and supports asymmetric signing with a selected signing key.
+- Authentik sources docs confirm external directories and social login sources; Facebook is handled as a social/OAuth source behind Authentik rather than as app-local OIDC.
+- Authentik user docs confirm users have `is_active`, groups, sessions, attributes, additional proxy headers, Admin UI management, API-backed automation, group assignment, deactivation, and session revocation.
+- Authentik invitation docs confirm invitation/enrollment flows, invitation emails, optional automatic group assignment through user-write stages, and invitation policies.
+- Authentik configuration and Docker Compose docs confirm PostgreSQL is required for application data/configuration/sessions/task coordination, file/S3 storage options exist, SMTP email settings can be configured, and Docker socket access for automatic outpost management has security risk that can be avoided with manual outpost deployment or a socket proxy.
+- Authelia docs confirm Caddy `forward_auth` and access control, but also state Authelia currently does not support the OIDC relying-party role.
+- Keycloak docs confirm rich identity brokering, social providers, roles/groups, workflows, Admin CLI/API, token signing, audience claims, and JWKS, but not a direct Caddy forward-auth gateway path.
+- OAuth2 Proxy docs confirm Google/Microsoft/Facebook and other providers, auth-request headers, config validation, and allowlist controls, but also note the multiple-providers feature is incomplete.
 
 ### Acceptance Criteria
 
-- [ ] One gateway pattern is selected with rationale.
-- [ ] Provider compatibility for Google, Microsoft, and Facebook is confirmed from current provider docs.
+- [x] One gateway pattern is selected with rationale.
+- [x] Provider compatibility for Google, Microsoft, and Facebook is confirmed from current provider docs.
 - [ ] The gateway can show a Create Account / Request Access action for unapproved users.
-- [ ] The gateway can return the identity/proof fields required by the downstream contract.
-- [ ] The selected user store and provisioning path are documented.
-- [ ] Basic Auth rollback mode remains possible until production OIDC is proven.
+- [x] The gateway can return the identity/proof fields required by the downstream contract.
+- [x] The selected user store and provisioning path are documented.
+- [x] Basic Auth rollback mode remains possible until production OIDC is proven.
 
 ### Verification
 
-- [ ] `docker compose -f docker/proxy/docker-compose.yml config`
+- [ ] `docker compose -f docker/proxy/docker-compose.yml config --no-env-resolution --no-interpolate`
 - [ ] `docker exec central-proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile` on staging after the proof route is installed.
 
 ### Files Likely Touched
@@ -357,7 +424,8 @@ Status: accepted for implementation planning on 2026-06-10.
 
 ### Exit Criteria
 
-- [ ] The implementation target is selected and provider-specific limitations are documented.
+- [x] The implementation target is selected and provider-specific limitations are documented.
+- [ ] The Authentik proof route is installed and validated in staging.
 
 ## Phase 3 - Env Schema, Secrets, User Store, And Provisioning Contract
 
@@ -430,7 +498,7 @@ Status: accepted for implementation planning on 2026-06-10.
 ### Verification
 
 - [ ] `source .venv/bin/activate && pytest -q tests/pytests/test_caddy_register.py`
-- [ ] `docker compose -f docker/proxy/docker-compose.yml config`
+- [ ] `docker compose -f docker/proxy/docker-compose.yml config --no-env-resolution --no-interpolate`
 - [ ] `docker exec central-proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile` on staging.
 
 ### Files Likely Touched
@@ -613,17 +681,14 @@ Status: accepted for implementation planning on 2026-06-10.
 ## Validation Plan
 
 - Protected-container focused tests: `source .venv/bin/activate && pytest -q tests/pytests/test_caddy_register.py tests/pytests/test_env_schema.py tests/pytests/test_env_schema_secrets.py`
-- Protected-container compose validation: `docker compose -f docker/proxy/docker-compose.yml config`
+- Protected-container compose validation: `docker compose -f docker/proxy/docker-compose.yml config --no-env-resolution --no-interpolate`
 - Caddy validation on staging: `docker exec central-proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`
 - stock-dashboard focused tests after downstream adoption: `source .venv/bin/activate && pytest -q tests/pytests/test_deploy_caddy_protection.py`
 - Manual/browser checks: login redirect, create-account/access-request page, unauthorized denial, approved access, deauthorization, spoofed-header rejection, signed-token validation, and websocket-backed pages.
 
 ## Open Questions
 
-- Which gateway should be selected: Authentik, Authelia, Keycloak, OAuth2 Proxy, or a custom Caddy plugin?
-- Is Level 2 signed-token proof mandatory for every protected app, or only for apps replacing their own auth?
-- Should signed assertions use asymmetric JWKS signing by default, with per-app `APP_SECRET` HMAC only as an opt-in compatibility mode?
-- Should authorization be broker group membership, individual email allowlist, provider-native group, or a combination?
-- Should the access-request flow only email `AUTH_APPROVER_EMAIL`, or should it create pending users inside the broker?
-- Is Facebook mandatory for the first production launch, or can Google/Microsoft ship first while Facebook provider behavior is verified?
+- Should the first Authentik staging route use a manually deployed proxy outpost or Docker-socket-managed outpost behind a socket proxy?
+- Should the access-request flow be an Authentik flow/denial page, a small protected-container helper page, or an operator-runbook-only first slice?
+- Is Level 2 signed-token proof required for every protected app at rollout, or only for apps replacing their own auth?
 - Which downstream app should be the first reference implementation for replacing local auth with the central identity contract?
