@@ -86,6 +86,29 @@ When `EDGE_AUTH_MODE=oidc`, validation requires `AUTHENTIK_PUBLIC_DOMAIN`, `AUTH
 
 Use `AUTHENTIK_BOOTSTRAP_PASSWORD_HASH` instead of a plaintext bootstrap password. Authentik's automated-install docs state that plaintext bootstrap passwords are supported but discouraged, while `AUTHENTIK_BOOTSTRAP_PASSWORD_HASH` stores only the local password verifier. Wrap generated hashes in single quotes in dotenv files so `$` characters are not interpolated.
 
+### Provision Approved Users
+
+Approved users live in Authentik, not in Caddy. Use [scripts/deploy/auth_users.py](../../scripts/deploy/auth_users.py) to preview or apply group membership for the approved-user group named by `AUTH_POLICY`.
+
+Dry-run examples do not require an API token:
+
+```bash
+source .venv/bin/activate
+python scripts/deploy/auth_users.py list --base-url auth.your-domain.com --group protected-container-users --dry-run
+python scripts/deploy/auth_users.py add --base-url auth.your-domain.com --group protected-container-users --email user@example.com --dry-run
+```
+
+For real changes, provide `AUTHENTIK_API_TOKEN` from your secret manager or process environment. Do not paste API tokens into commands that will be saved in shell history.
+
+```bash
+source .venv/bin/activate
+python scripts/deploy/auth_users.py add --base-url auth.your-domain.com --group protected-container-users --email user@example.com
+python scripts/deploy/auth_users.py remove --base-url auth.your-domain.com --group protected-container-users --email user@example.com --deactivate
+python scripts/deploy/auth_users.py sync --base-url auth.your-domain.com --group protected-container-users --user-file approved-users.csv --dry-run
+```
+
+The sync file format is `email[,username,name]` per line. Blank lines and `#` comments are ignored. The script logs user identifiers and actions only; it must not print API tokens, provider secrets, signing keys, session cookies, or full JWTs.
+
 ## Add a new deploy-time variable (example)
 
 Example: add a non-secret deploy config value `MY_FEATURE_FLAG` that should be stored in `.env.deploy` and also synced to GitHub Actions variables.

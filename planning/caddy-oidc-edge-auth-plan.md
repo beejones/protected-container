@@ -431,30 +431,39 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 
 ### Tasks
 
-- [ ] Add explicit vars for `EDGE_AUTH_MODE`, auth gateway service/port/verify URI, public auth callback domain, copied identity headers, token header name, `AUTH_APPROVER_EMAIL`, default proof level, and default token issuer.
-- [ ] Default `AUTH_APPROVER_EMAIL` to `ACME_EMAIL` when not set, and document that production approval uses `ronny.bjones@hotmail.com` through env configuration.
-- [ ] Add app registration fields for `AUTH_AUDIENCE`, `AUTH_POLICY`, `AUTH_PROOF_LEVEL`, and optional `AUTH_SECRET_REF`.
-- [ ] Add required secrets for the selected gateway only: provider client secrets, cookie/session signing, bootstrap admin secret, token signing keys, JWKS private key, or per-app HMAC secret references.
-- [ ] Add user-store config for the selected gateway, including database volume/backup path or file-backed approved-users source.
-- [ ] Add authorization config for broker-managed groups or a file-backed approved-email list.
-- [ ] Add `scripts/deploy/auth_users.py` or equivalent to provision users up front with `list`, `add`, `remove`, `sync`, and `--dry-run` modes.
-- [ ] Ensure the provisioning script logs user identifiers and actions, but never provider secrets, signing keys, app secrets, session cookies, or full tokens.
-- [ ] Update env examples with placeholder-only values.
-- [ ] Extend schema tests for known keys, unknown-key failures, and cross-field rules when `EDGE_AUTH_MODE=oidc`.
+- [x] Add explicit vars for `EDGE_AUTH_MODE`, auth gateway service/port/verify URI, public auth callback domain, copied identity headers, token header name, `AUTH_APPROVER_EMAIL`, default proof level, and default token issuer.
+- [x] Default `AUTH_APPROVER_EMAIL` to `ACME_EMAIL` when not set, and document that production approval uses `ronny.bjones@hotmail.com` through env configuration.
+- [x] Add app registration fields for `AUTH_AUDIENCE`, `AUTH_POLICY`, `AUTH_PROOF_LEVEL`, and optional `AUTH_SECRET_REF`.
+- [x] Add required secrets for the selected gateway only: provider client secrets, cookie/session signing, bootstrap admin secret, token signing keys, JWKS private key, or per-app HMAC secret references.
+- [x] Add user-store config for the selected gateway, including database volume/backup path or file-backed approved-users source.
+- [x] Add authorization config for broker-managed groups or a file-backed approved-email list.
+- [x] Add `scripts/deploy/auth_users.py` or equivalent to provision users up front with `list`, `add`, `remove`, `sync`, and `--dry-run` modes.
+- [x] Ensure the provisioning script logs user identifiers and actions, but never provider secrets, signing keys, app secrets, session cookies, or full tokens.
+- [x] Update env examples with placeholder-only values.
+- [x] Extend schema tests for known keys, unknown-key failures, and cross-field rules when `EDGE_AUTH_MODE=oidc`.
+
+### Phase 3 Implementation Notes
+
+- `EDGE_AUTH_MODE` defaults to `basic`, preserving Basic Auth rollback until OIDC mode is explicitly enabled.
+- Authentik deploy-time vars and secrets are schema-defined. Secrets include `AUTHENTIK_SECRET_KEY`, `AUTHENTIK_POSTGRESQL__PASSWORD`, `AUTHENTIK_BOOTSTRAP_PASSWORD_HASH`, `AUTHENTIK_BOOTSTRAP_TOKEN`, `AUTHENTIK_API_TOKEN`, SMTP password, and social provider client secrets.
+- `AUTH_APPROVER_EMAIL` is resolved from explicit env first and falls back to `ACME_EMAIL`; the production approver address remains an environment value rather than a hardcoded repo default.
+- Approved users live in Authentik group/application policy state. `AUTH_POLICY` names the approved-user group, and `scripts/deploy/auth_users.py` provides `list`, `add`, `remove`, `sync`, and `--dry-run` operations against Authentik's documented user/group API.
+- The provisioning wrapper logs action, status, user email, and group details only. API tokens and provider/signing/session secrets are never printed by the script.
+- Authentik's PostgreSQL-backed user/config/session store is represented by explicit PostgreSQL connection keys and `AUTHENTIK_BACKUP_DIR`; the concrete compose volumes are implemented in Phase 4.
 
 ### Acceptance Criteria
 
-- [ ] Every new key is schema-defined and categorized as var or secret.
-- [ ] Missing OIDC-required keys fail with actionable validation errors only when OIDC mode is enabled.
-- [ ] Basic Auth keys remain valid while `EDGE_AUTH_MODE=basic` is supported as rollback.
-- [ ] No provider secret, app secret, or token-signing material appears in docs, examples, logs, Caddyfile output, or generated plans.
-- [ ] Approved users can be provisioned before first login through a documented script or gateway API.
-- [ ] The selected user store has a documented backup/restore path.
+- [x] Every new key is schema-defined and categorized as var or secret.
+- [x] Missing OIDC-required keys fail with actionable validation errors only when OIDC mode is enabled.
+- [x] Basic Auth keys remain valid while `EDGE_AUTH_MODE=basic` is supported as rollback.
+- [x] No provider secret, app secret, or token-signing material appears in docs, examples, logs, Caddyfile output, or generated plans.
+- [x] Approved users can be provisioned before first login through a documented script or gateway API.
+- [x] The selected user store has a documented backup/restore path.
 
 ### Verification
 
-- [ ] `source .venv/bin/activate && pytest -q tests/pytests/test_env_schema.py tests/pytests/test_env_schema_secrets.py`
-- [ ] `source .venv/bin/activate && python scripts/deploy/validate_env.py`
+- [x] `source .venv/bin/activate && pytest -q tests/pytests/test_auth_users.py tests/pytests/test_env_schema.py tests/pytests/test_env_schema_secrets.py`
+- [x] `source .venv/bin/activate && python scripts/deploy/validate_env.py --runtime out/tmp/phase3.env --deploy out/tmp/phase3.env.deploy` with placeholder OIDC values and placeholder Authentik secrets exported in-process.
 
 ### Files Likely Touched
 
@@ -467,10 +476,11 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 - `env.example`
 - `env.secrets.example`
 - `env.deploy.example`
+- `env.deploy.secrets.example`
 
 ### Exit Criteria
 
-- [ ] The repo has a validated configuration contract for central OIDC edge auth, authorized-user storage, and upfront user provisioning.
+- [x] The repo has a validated configuration contract for central OIDC edge auth, authorized-user storage, and upfront user provisioning.
 
 ## Phase 4 - Shared Caddy Auth Snippet And Route Registration
 
