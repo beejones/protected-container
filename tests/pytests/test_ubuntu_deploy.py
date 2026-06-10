@@ -417,13 +417,19 @@ def test_portainer_ensure_running_remote_cmd_contains_expected_steps():
     assert "docker network inspect caddy" in out
     assert "docker pull portainer/portainer-ce:latest" in out
     assert "docker image inspect --format '{{.Id}}' portainer/portainer-ce:latest" in out
+    assert "portainer_on_caddy()" in out
+    assert "portainer_has_host_ports()" in out
     assert "docker ps --format '{{.Names}}'" in out
     assert "docker ps -a --format '{{.Names}}'" in out
     assert "docker start portainer" in out
     assert "docker rm -f portainer" in out
     assert "docker run -d --name portainer" in out
-    assert "docker network connect caddy portainer" in out
-    assert "-p 9943:9443" in out
+    assert "--network caddy" in out
+    assert "Recreating Portainer on caddy network" in out
+    assert "Recreating Portainer without host port bindings" in out
+    assert "docker network connect caddy portainer" not in out
+    assert "-p 9943:9443" not in out
+    assert "-p 8000:8000" not in out
 
 
 def test_proxy_deploy_script_force_recreates_caddy_to_flush_synced_caddyfile():

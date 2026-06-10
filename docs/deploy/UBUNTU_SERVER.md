@@ -99,7 +99,7 @@ python scripts/deploy/ubuntu_deploy.py \
   --sync-secrets
 ```
 
-This pushes the image, syncs `docker-compose.yml` and `.env` files, refreshes the central Caddy proxy, ensures Portainer is running on `portainer/portainer-ce:latest`, and triggers Portainer to pull and restart the stack. If an existing `portainer` container was created from an older image, the deploy script recreates it with the same `portainer_data` volume before using the Portainer API or webhook.
+This pushes the image, syncs `docker-compose.yml` and `.env` files, refreshes the central Caddy proxy, ensures Portainer is running on `portainer/portainer-ce:latest` on the external `caddy` network, and triggers Portainer to pull and restart the stack. If an existing `portainer` container was created from an older image, without the `caddy` network, or with host port bindings, the deploy script recreates it with the same `portainer_data` volume before using the Portainer API or webhook.
 
 ## Troubleshooting Caddy
 
