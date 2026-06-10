@@ -229,7 +229,7 @@ Provider: Google | Microsoft | Facebook
 - [x] Phase 2: Auth gateway selection and proof-route target
 - [x] Phase 3: Env schema, secrets, user store, and provisioning contract
 - [ ] Phase 4: Shared Caddy auth snippet and route registration (route-generation slice complete; live staging proof checks remain)
-- [ ] Phase 5: Identity proof contract for downstream containers
+- [ ] Phase 5: Identity proof contract for downstream containers (docs complete; live header proof checks remain)
 - [ ] Phase 6: New-user authorization workflow
 - [ ] Phase 7: stock-dashboard adoption and smoke tests
 - [ ] Phase 8: Staging, production migration, and cleanup
@@ -540,27 +540,34 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 
 ### Tasks
 
-- [ ] in the future we will also needs OAUTH2 flows for machine to machine. Can our current architecture accomodate this
-- [ ] Create downstream-container docs that explain how to use the auth mechanism from an app's perspective.
-- [ ] Document the Level 1 trusted-header contract and the Level 2 signed-token contract.
-- [ ] Document exactly which headers Caddy strips and which headers it sets after gateway approval.
-- [ ] Document requirements for apps that replace local auth: no host ports, only central Caddy ingress, strict trusted-proxy config, signed-token verification for sensitive workflows, and audit logging of the authenticated email/user.
-- [ ] Document token verification requirements for issuer, audience, expiry, signature, route/host claim when available, and provider/user identity claims.
-- [ ] Document the tradeoff between per-app `APP_SECRET` HMAC signing and asymmetric JWKS signing.
-- [ ] Add migration guidance for downstream containers to turn off local password auth only after Level 2 proof is verified where needed.
-- [ ] Document what an app cannot prove if Caddy is compromised, and why signing keys must stay outside Caddy.
+- [x] Answer whether the current architecture can accommodate future OAuth2 machine-to-machine flows.
+- [x] Create downstream-container docs that explain how to use the auth mechanism from an app's perspective.
+- [x] Document the Level 1 trusted-header contract and the Level 2 signed-token contract.
+- [x] Document exactly which headers Caddy strips and which headers it sets after gateway approval.
+- [x] Document requirements for apps that replace local auth: no host ports, only central Caddy ingress, strict trusted-proxy config, signed-token verification for sensitive workflows, and audit logging of the authenticated email/user.
+- [x] Document token verification requirements for issuer, audience, expiry, signature, route/host claim when available, and provider/user identity claims.
+- [x] Document the tradeoff between per-app `APP_SECRET` HMAC signing and asymmetric JWKS signing.
+- [x] Add migration guidance for downstream containers to turn off local password auth only after Level 2 proof is verified where needed.
+- [x] Document what an app cannot prove if Caddy is compromised, and why signing keys must stay outside Caddy.
+
+### Phase 5 Implementation Notes
+
+- Added `docs/deploy/UPSTREAM_AUTH_CONTRACT.md` as the canonical downstream app contract.
+- The contract documents Level 1 trusted proxy headers, Level 2 signed JWT proof, exact current Caddy/Auth headers, app-side validation requirements, no-direct-public-access requirements, and the checklist that must pass before local app auth is disabled.
+- Machine-to-machine OAuth2 is supported by the selected architecture through Authentik OAuth2 providers and `client_credentials`; it is documented as a separate API/service-token contract from browser `forward_auth` sessions.
+- `docs/deploy/SHARED_CADDY_ROUTING.md` and `docs/deploy/UBUNTU_SERVER.md` now link downstream apps to the auth contract before they consume headers or replace local auth.
 
 ### Acceptance Criteria
 
-- [ ] Other containers have a clear contract for consuming central Caddy authentication.
-- [ ] Header spoofing risks and mitigations are explicit.
-- [ ] Apps can distinguish display identity from cryptographic proof.
-- [ ] The docs do not imply that provider login alone grants authorization.
-- [ ] The docs include a minimal validation checklist for app owners before disabling local auth.
+- [x] Other containers have a clear contract for consuming central Caddy authentication.
+- [x] Header spoofing risks and mitigations are explicit.
+- [x] Apps can distinguish display identity from cryptographic proof.
+- [x] The docs do not imply that provider login alone grants authorization.
+- [x] The docs include a minimal validation checklist for app owners before disabling local auth.
 
 ### Verification
 
-- [ ] Documentation review against `docs/deploy/SHARED_CADDY_ROUTING.md`.
+- [x] Documentation review against `docs/deploy/SHARED_CADDY_ROUTING.md`.
 - [ ] Staging route sends identity/proof headers only after successful auth.
 - [ ] Staging route does not forward spoofed client `X-Auth-*` headers.
 
@@ -573,7 +580,8 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 
 ### Exit Criteria
 
-- [ ] Downstream apps have enough guidance to replace local auth safely.
+- [x] Downstream apps have enough guidance to replace local auth safely.
+- [ ] Live staging proves Authentik-approved requests send the documented headers and spoofed client headers are stripped.
 
 ## Phase 6 - New-User Authorization Workflow
 

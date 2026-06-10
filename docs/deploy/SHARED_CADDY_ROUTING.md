@@ -25,6 +25,8 @@ The generated site block uses the selected `EDGE_AUTH_MODE` from `.env.deploy`:
 
 App-specific auth such as session login or API keys remains separate defense-in-depth behind that Caddy boundary.
 
+Apps that consume central identity headers or signed proof must follow the [Upstream Auth Contract](UPSTREAM_AUTH_CONTRACT.md). Do not disable app-local auth until the app has passed the contract checklist for its chosen proof level.
+
 When `EDGE_AUTH_MODE=oidc` is enabled, the central proxy stack must also run the Authentik services from the `oidc` Compose profile:
 
 ```bash
