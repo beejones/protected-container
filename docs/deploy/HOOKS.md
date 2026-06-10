@@ -134,7 +134,7 @@ For `ubuntu_deploy.py`, `deploy_result` includes:
 The `settings` object is mutable:
 
 - `settings.csv_path` (`Path`): CSV path to write. Relative paths are resolved from `ctx.repo_root`.
-- `settings.versioning_enabled` (`bool`, default `True`): when `False`, deploy rows still record the current `APP_VERSION`, but deploys do not require a prior version row. Merge records still bump `APP_VERSION` for a new git ref, but skip the changelog-entry check. When enabled, successful deploys require an existing version row for the git ref, normally created by `python scripts/deploy/deploy_log.py --record-merge`; repeated records for the same git ref reuse the logged version.
+- `settings.versioning_enabled` (`bool`, default `True`): when `False`, deploy rows still record the current `APP_VERSION`, and merge records still bump `APP_VERSION` for a new git ref but skip the changelog-entry check. When enabled, repeated successful deploy records for the same git ref reuse the logged version; new deploy refs record the current `APP_VERSION` without requiring a pre-created merge row.
 
 ### `on_error(ctx, exc)`
 - **Summary**: If an exception occurs during the deployment lifecycle.

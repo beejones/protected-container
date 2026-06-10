@@ -427,6 +427,7 @@ services:
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.render_compose_stack_content", fake_render_compose_stack_content)
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.is_portainer_access_token_valid", lambda **kwargs: True)
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.resolve_portainer_webhook_url_via_api", lambda **kwargs: "")
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.set_portainer_stack_containers_state", lambda **kwargs: [kwargs["stack_name"]])
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.ensure_caddy_registration", lambda **kwargs: None)
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.is_domain_registered", lambda **kwargs: True)
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log._read_app_version", lambda repo_root: "1.2.3")
@@ -436,7 +437,7 @@ services:
     assert ["bash", str(tmp_path / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh")] in subprocess_calls
 
 
-def test_main_requires_post_merge_version_record_before_remote_work(tmp_path, monkeypatch):
+def test_main_allows_new_git_ref_without_prior_version_log_row(tmp_path, monkeypatch):
     (tmp_path / "docker").mkdir()
     (tmp_path / "docker" / "docker-compose.yml").write_text("services: {}\n")
     (tmp_path / "docker" / "docker-compose.ubuntu.yml").write_text("services: {}\n")
@@ -480,10 +481,17 @@ def test_main_requires_post_merge_version_record_before_remote_work(tmp_path, mo
             return None
 
     remote_calls: list[list[str]] = []
+    deploy_record_git_refs: list[str] = []
 
     def fake_run(cmd, *args, **kwargs):
         remote_calls.append(cmd)
-        raise AssertionError("remote commands should not run before changelog validation")
+
+        class DummyResult:
+            returncode = 0
+            stdout = "hostname 192.168.1.241\n"
+            stderr = ""
+
+        return DummyResult()
 
     def fake_render_compose_stack_content(*, repo_root, compose_files):
         return "services:\n  app:\n    image: example/app:staged\n"
@@ -492,11 +500,26 @@ def test_main_requires_post_merge_version_record_before_remote_work(tmp_path, mo
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.render_compose_stack_content", fake_render_compose_stack_content)
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log._get_git_ref", lambda repo_root: "new-git-ref")
     monkeypatch.setattr("scripts.deploy.ubuntu_deploy.subprocess.run", fake_run)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy._run", lambda *args, **kwargs: None)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.is_portainer_access_token_valid", lambda **kwargs: True)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.resolve_portainer_webhook_url_via_api", lambda **kwargs: "")
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.set_portainer_stack_containers_state", lambda **kwargs: [kwargs["stack_name"]])
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.ensure_caddy_registration", lambda **kwargs: None)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.caddy_register.is_domain_registered", lambda **kwargs: True)
 
-    with pytest.raises(RuntimeError, match="post-merge version-log command"):
-        main([], repo_root_override=tmp_path)
+    def fake_append_deploy_record_with_settings(**kwargs):
+        deploy_record_git_refs.append(kwargs.get("git_ref") or "new-git-ref")
+        return tmp_path / "out" / "deploy" / "version_log.csv"
 
-    assert remote_calls == []
+    monkeypatch.setattr(
+        "scripts.deploy.ubuntu_deploy.deploy_log.append_deploy_record_with_settings",
+        fake_append_deploy_record_with_settings,
+    )
+
+    main([], repo_root_override=tmp_path)
+
+    assert remote_calls
+    assert deploy_record_git_refs == ["new-git-ref"]
 
 
 def test_rewrite_staging_container_names_for_portainer_avoids_production_name_collisions():
