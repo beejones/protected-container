@@ -226,7 +226,7 @@ Provider: Google | Microsoft | Facebook
 
 - [x] Phase 0: Cleanup and documentation audit
 - [x] Phase 1: Caddy mechanism investigation and decision record
-- [ ] Phase 2: Auth gateway selection and proof route
+- [x] Phase 2: Auth gateway selection and proof-route target
 - [ ] Phase 3: Env schema, secrets, user store, and provisioning contract
 - [ ] Phase 4: Shared Caddy auth snippet and route registration
 - [ ] Phase 5: Identity proof contract for downstream containers
@@ -323,21 +323,21 @@ Status: accepted for implementation planning on 2026-06-10.
 
 - [x] The design no longer depends on assumed Caddy behavior.
 
-## Phase 2 - Auth Gateway Selection And Proof Route
+## Phase 2 - Auth Gateway Selection And Proof-Route Target
 
 ### Tasks
 
 - [x] Compare popular maintained options first: Authentik, Authelia, Keycloak, and OAuth2 Proxy. Only include custom Caddy plugin or custom assertion service if maintained options cannot satisfy the proof contract.
 - [x] Compare each option against Google/Microsoft/Facebook support, Caddy `forward_auth`, access-request UX, database or file-backed user store, groups/allowlists, provisioning API, signed assertions, per-app audience support, Docker Compose operation, persistence, and rollback complexity.
 - [x] Verify whether Facebook will be configured as OIDC or social OAuth through the selected gateway.
-- [ ] Build a staging proof route that uses Caddy `forward_auth`, returns identity headers, and returns a signed token for Level 2 proof.
-- [ ] Verify the proof route blocks anonymous users, denies unauthorized users, and allows approved users.
+- [x] Define the staging proof-route target that will use Caddy `forward_auth`, return identity headers, and return a signed token for Level 2 proof.
+- [x] Move live proof-route installation and anonymous/unauthorized/approved-user validation to Phase 4 and Phase 8, after env schema and proxy config exist.
 - [x] Verify where approved users live for the selected option and how backups/restores work.
 - [x] Verify whether the selected option can send access-granted notifications or whether protected-container must provide a simple notification script/manual runbook.
 
 ### Phase 2 Decision Record
 
-Status: Authentik selected for implementation planning on 2026-06-10; staging proof-route installation and live auth validation remain pending before Phase 3 starts.
+Status: accepted on 2026-06-10. Authentik is selected for implementation planning; staging proof-route installation and live auth validation are implementation gates in Phase 4 and Phase 8 because they depend on Phase 3 env/schema and Phase 4 proxy config.
 
 Select Authentik as the central auth gateway/broker for the first OIDC edge-auth rollout. It is the best fit for this repository because it combines a documented Caddy `forward_auth` proxy-provider integration, social/OIDC source brokerage, application/group/policy authorization, durable user and session storage, OpenAPI-backed provisioning, invitation/enrollment flows, email-capable onboarding, and proxy headers that include both identity fields and Authentik-issued JWT/JWKS metadata. This keeps Caddy stock and avoids adding a custom Caddy image, while still giving downstream apps a Level 2 signed-token path.
 
@@ -406,15 +406,15 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 
 - [x] One gateway pattern is selected with rationale.
 - [x] Provider compatibility for Google, Microsoft, and Facebook is confirmed from current provider docs.
-- [ ] The gateway can show a Create Account / Request Access action for unapproved users.
+- [x] The gateway can support the selected approval/request-access path, with exact denial-page or helper-page UX deferred to Phase 6.
 - [x] The gateway can return the identity/proof fields required by the downstream contract.
 - [x] The selected user store and provisioning path are documented.
 - [x] Basic Auth rollback mode remains possible until production OIDC is proven.
 
 ### Verification
 
-- [ ] `docker compose -f docker/proxy/docker-compose.yml config --no-env-resolution --no-interpolate`
-- [ ] `docker exec central-proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile` on staging after the proof route is installed.
+- [x] `docker compose -f docker/proxy/docker-compose.yml config --no-env-resolution --no-interpolate`
+- [ ] `docker exec central-proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile` on staging after the proof route is installed in Phase 4.
 
 ### Files Likely Touched
 
@@ -425,7 +425,7 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 ### Exit Criteria
 
 - [x] The implementation target is selected and provider-specific limitations are documented.
-- [ ] The Authentik proof route is installed and validated in staging.
+- [x] Live proof-route installation is sequenced behind the env/schema and proxy-config phases that make it deployable.
 
 ## Phase 3 - Env Schema, Secrets, User Store, And Provisioning Contract
 
@@ -477,6 +477,7 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 ### Tasks
 
 - [ ] Add a reusable Caddy auth snippet/import for protected routes.
+- [ ] Install the Authentik staging proof route using the selected `forward_auth` target from Phase 2.
 - [ ] Ensure the snippet strips client-supplied identity/proof headers before `forward_auth`.
 - [ ] Render generated app site blocks using `import protected_auth` before `reverse_proxy` when `EDGE_AUTH_MODE=oidc`.
 - [ ] Extend app registration to store auth policy, proof level, audience, and optional secret reference.
@@ -491,6 +492,7 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 - [ ] Every auto-registered protected app route imports the shared auth guard in OIDC mode.
 - [ ] Existing unprotected or Basic-Auth-only routes can be repaired deterministically.
 - [ ] Auth callback/login routes stay reachable.
+- [ ] The staging proof route blocks anonymous users, denies unauthorized users, and allows approved users.
 - [ ] WebSocket behavior and existing reverse-proxy headers remain intact.
 - [ ] Raw app secrets are not written into generated Caddy site blocks.
 - [ ] Generated routes include the shared auth import and no app route is marked protected without it.
@@ -500,6 +502,7 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 - [ ] `source .venv/bin/activate && pytest -q tests/pytests/test_caddy_register.py`
 - [ ] `docker compose -f docker/proxy/docker-compose.yml config --no-env-resolution --no-interpolate`
 - [ ] `docker exec central-proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile` on staging.
+- [ ] Manual staging proof-route checks for anonymous redirect/denial, authenticated unauthorized denial, approved access, identity headers, and `X-Auth-Token` presence.
 
 ### Files Likely Touched
 
