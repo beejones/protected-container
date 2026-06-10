@@ -62,6 +62,13 @@ Then run the bash script:
 bash scripts/deploy/ubuntu_deploy_proxy.sh
 ```
 
+When `.env.deploy` sets `EDGE_AUTH_MODE=oidc`, the proxy deploy script starts the Authentik services with the Compose `oidc` profile and syncs the proxy env files alongside the proxy compose directory. The normal app deploy path also refreshes the central proxy stack before registering OIDC routes:
+
+```bash
+source .venv/bin/activate
+python scripts/deploy/ubuntu_deploy.py --prod --sync-secrets
+```
+
 *(This script automatically deploys to `~/containers/central-proxy` and ensures the external `caddy` docker network is created on the remote host.)*
 
 ### 2. Stand up Portainer (Admin UI)

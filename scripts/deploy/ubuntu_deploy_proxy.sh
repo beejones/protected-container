@@ -39,8 +39,21 @@ if [ -z "${PUBLIC_DOMAIN:-}" ]; then
   exit 1
 fi
 
+EDGE_AUTH_MODE_LOWER="$(printf '%s' "${EDGE_AUTH_MODE:-basic}" | tr '[:upper:]' '[:lower:]')"
+COMPOSE_PROFILE_ARGS=""
+if [ "${EDGE_AUTH_MODE_LOWER}" = "oidc" ]; then
+  for required_key in AUTHENTIK_PUBLIC_DOMAIN AUTHENTIK_SECRET_KEY AUTHENTIK_POSTGRESQL__PASSWORD; do
+    if [ -z "${!required_key:-}" ]; then
+      echo "[proxy-deploy] ❌ Error: ${required_key} is required when EDGE_AUTH_MODE=oidc" >&2
+      exit 1
+    fi
+  done
+  COMPOSE_PROFILE_ARGS="--profile oidc"
+fi
+
 DEFAULT_PROXY_BASE="${UBUNTU_REMOTE_DIR:-~/containers/protected-container}"
 PROXY_DIR="${UBUNTU_PROXY_DIR:-${DEFAULT_PROXY_BASE}/docker/proxy}"
+REMOTE_ENV_DIR="$(dirname "$(dirname "${PROXY_DIR}")")"
 
 echo "[proxy-deploy] 🚀 Deploying Central Caddy Proxy to ${UBUNTU_SSH_HOST}..."
 
@@ -49,6 +62,18 @@ echo "[proxy-deploy] 📦 Syncing proxy configuration to ${PROXY_DIR}..."
 ssh "${UBUNTU_SSH_HOST}" "mkdir -p ${PROXY_DIR}"
 rsync -avz docker/proxy/ "${UBUNTU_SSH_HOST}:${PROXY_DIR}/"
 
+env_paths=()
+for env_file in .env .env.secrets .env.deploy .env.deploy.secrets; do
+  if [ -f "${env_file}" ]; then
+    env_paths+=("${env_file}")
+  fi
+done
+if [ "${#env_paths[@]}" -gt 0 ]; then
+  echo "[proxy-deploy] 🔐 Syncing proxy environment files to ${REMOTE_ENV_DIR}..."
+  ssh "${UBUNTU_SSH_HOST}" "mkdir -p ${REMOTE_ENV_DIR}"
+  rsync -avz "${env_paths[@]}" "${UBUNTU_SSH_HOST}:${REMOTE_ENV_DIR}/"
+fi
+
 echo "[proxy-deploy] 🌐 Ensuring external 'caddy' network exists..."
 ssh "${UBUNTU_SSH_HOST}" "docker network inspect caddy >/dev/null 2>&1 || docker network create caddy"
 
@@ -56,12 +81,16 @@ echo "[proxy-deploy] 🟢 Starting proxy on remote host..."
 # We explicitly pass the environment variables inline to docker compose to ensure they are available
 ssh "${UBUNTU_SSH_HOST}" "
   cd ${PROXY_DIR}
-  export ACME_EMAIL='${ACME_EMAIL}'
-  export PUBLIC_DOMAIN='${PUBLIC_DOMAIN}'
+  set -a
+  [ -f ../../.env ] && . ../../.env || true
+  [ -f ../../.env.secrets ] && . ../../.env.secrets || true
+  [ -f ../../.env.deploy ] && . ../../.env.deploy || true
+  [ -f ../../.env.deploy.secrets ] && . ../../.env.deploy.secrets || true
+  set +a
   if docker compose version >/dev/null 2>&1; then
-    docker compose up -d
+    docker compose ${COMPOSE_PROFILE_ARGS} up -d
   elif command -v docker-compose >/dev/null 2>&1; then
-    docker-compose up -d
+    docker-compose ${COMPOSE_PROFILE_ARGS} up -d
   else
     echo '[proxy-deploy] ❌ Error: Docker Compose is not installed on the remote host. Install docker-compose-v2 or docker-compose and retry.' >&2
     exit 1

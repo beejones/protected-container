@@ -33,7 +33,7 @@ When `EDGE_AUTH_MODE=oidc` is enabled, the central proxy stack must also run the
 docker compose -f docker/proxy/docker-compose.yml --profile oidc up -d
 ```
 
-Without that profile, Caddy can render OIDC routes but the `authentik-server:9000` forward-auth target will not exist.
+The normal Ubuntu path handles this through `python scripts/deploy/ubuntu_deploy.py`: when OIDC mode is selected it updates the central proxy stack before route registration. Without that profile, Caddy can render OIDC routes but the `authentik-server:9000` forward-auth target will not exist.
 
 ## Step-by-step
 

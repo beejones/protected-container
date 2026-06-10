@@ -1234,6 +1234,8 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     if storage_registrations:
         log_info(f"Detected {len(storage_registrations)} storage-manager label registration(s)", icon="🧹")
 
+    edge_auth_registration = resolve_caddy_edge_auth_registration(repo_root=repo_root)
+
     log_step("Checking SSH connectivity", icon="🔌")
     try:
         subprocess.run(
@@ -1339,6 +1341,20 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             log_info(f"Warning: {proxy_script} not found. Cannot auto-deploy proxy.", icon="⚠️")
     else:
         log_info("Central proxy is already running.")
+        if edge_auth_registration.mode == caddy_register.AUTH_MODE_OIDC:
+            log_info("OIDC mode selected. Updating central proxy stack so Authentik services are available.")
+            proxy_script = repo_root / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh"
+            if proxy_script.exists():
+                try:
+                    subprocess.run(["bash", str(proxy_script)], check=True)
+                except subprocess.CalledProcessError as exc:
+                    detail = _subprocess_error_text(exc)
+                    message = "Failed to update central proxy via ubuntu_deploy_proxy.sh"
+                    if detail:
+                        message = f"{message}: {detail}"
+                    raise SystemExit(message)
+            else:
+                log_info(f"Warning: {proxy_script} not found. Cannot update OIDC proxy stack.", icon="⚠️")
 
     used_remote_compose_fallback = False
 
@@ -1527,8 +1543,6 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         # Override with CADDY_PROXY_DIR when downstream layout differs.
         proxy_repo_dir = Path(resolved_caddy_proxy_dir) if resolved_caddy_proxy_dir else (remote_dir.parent / "protected-container")
         caddyfile_path = str(proxy_repo_dir / "docker" / "proxy" / "Caddyfile")
-        edge_auth_registration = resolve_caddy_edge_auth_registration(repo_root=repo_root)
-
         log_step("Registering with centralized Caddy proxy", icon="🔒")
         try:
             caddy_register.ensure_caddy_registration(
