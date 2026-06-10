@@ -7,6 +7,7 @@ import pytest
 from scripts.deploy.env_schema import (
     DEPLOY_SCHEMA,
     RUNTIME_SCHEMA,
+    SECRETS_SCHEMA,
     EnvValidationError,
     SecretsEnum,
     VarsEnum,
@@ -71,6 +72,23 @@ def test_storage_manager_keys_are_known_runtime_keys(tmp_path: Path) -> None:
     assert kv2[VarsEnum.SM_LOG_LEVEL.value] == "INFO"
     assert kv2[VarsEnum.SM_DB_PATH.value] == "/data/storage_manager.db"
     assert kv2[VarsEnum.SM_API_PORT.value] == "9100"
+
+
+def test_example_env_files_use_known_schema_keys_and_oidc_contract() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    runtime = parse_dotenv_file(repo_root / "env.example")
+    runtime_secrets = parse_dotenv_file(repo_root / "env.secrets.example")
+    deploy = parse_dotenv_file(repo_root / "env.deploy.example")
+    deploy_secrets = parse_dotenv_file(repo_root / "env.deploy.secrets.example")
+
+    validate_known_keys(RUNTIME_SCHEMA, runtime, context="env.example")
+    validate_known_keys(SECRETS_SCHEMA, runtime_secrets, context="env.secrets.example")
+    validate_known_keys(DEPLOY_SCHEMA, deploy, context="env.deploy.example")
+    validate_known_keys(DEPLOY_SCHEMA, deploy_secrets, context="env.deploy.secrets.example")
+    validate_cross_field_rules(
+        deploy_kv={**deploy, **deploy_secrets},
+        context="example env files",
+    )
 
 
 def test_alias_keys_fail(tmp_path: Path) -> None:

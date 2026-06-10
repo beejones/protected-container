@@ -53,11 +53,15 @@ class VarsEnum(str, Enum):
     # Domain / TLS
     PUBLIC_DOMAIN = "PUBLIC_DOMAIN"
     ACME_EMAIL = "ACME_EMAIL"
+    WEB_PORT = "WEB_PORT"
 
     # Image / registry
     APP_IMAGE = "APP_IMAGE"
     GHCR_PRIVATE = "GHCR_PRIVATE"
     GHCR_USERNAME = "GHCR_USERNAME"
+    DOCKERFILE = "DOCKERFILE"
+    STORAGE_MANAGER_IMAGE = "STORAGE_MANAGER_IMAGE"
+    STORAGE_MANAGER_DOCKERFILE = "STORAGE_MANAGER_DOCKERFILE"
 
     # Defaults / sizing
     APP_CPU_CORES = "APP_CPU_CORES"
@@ -81,6 +85,19 @@ class VarsEnum(str, Enum):
     STAGING_PUBLIC_DOMAIN = "STAGING_PUBLIC_DOMAIN"
     STAGING_REMOTE_DIR = "STAGING_REMOTE_DIR"
     STAGING_PORTAINER_STACK_NAME = "STAGING_PORTAINER_STACK_NAME"
+
+    # Ubuntu / Portainer deployment
+    UBUNTU_SSH_HOST = "UBUNTU_SSH_HOST"
+    UBUNTU_REMOTE_DIR = "UBUNTU_REMOTE_DIR"
+    UBUNTU_COMPOSE_FILES = "UBUNTU_COMPOSE_FILES"
+    UBUNTU_BUILD_PUSH = "UBUNTU_BUILD_PUSH"
+    UBUNTU_SYNC_SECRETS = "UBUNTU_SYNC_SECRETS"
+    PORTAINER_HTTPS_PORT = "PORTAINER_HTTPS_PORT"
+    PORTAINER_WEBHOOK_INSECURE = "PORTAINER_WEBHOOK_INSECURE"
+    PORTAINER_STACK_NAME = "PORTAINER_STACK_NAME"
+    PORTAINER_ENDPOINT_ID = "PORTAINER_ENDPOINT_ID"
+    CADDY_PROXY_DIR = "CADDY_PROXY_DIR"
+    STORAGE_MANAGER_API_URL = "STORAGE_MANAGER_API_URL"
 
     # Runtime
     BASIC_AUTH_USER = "BASIC_AUTH_USER"
@@ -140,6 +157,11 @@ class SecretsEnum(str, Enum):
 
     # App/runtime secret (optional; user-defined)
     APP_SECRET = "APP_SECRET"
+
+    # Portainer deploy secrets
+    PORTAINER_WEBHOOK_URL = "PORTAINER_WEBHOOK_URL"
+    PORTAINER_WEBHOOK_TOKEN = "PORTAINER_WEBHOOK_TOKEN"
+    PORTAINER_ACCESS_TOKEN = "PORTAINER_ACCESS_TOKEN"
 
     # Authentik / central edge auth secrets
     AUTHENTIK_SECRET_KEY = "AUTHENTIK_SECRET_KEY"
@@ -328,6 +350,12 @@ DEPLOY_SCHEMA: tuple[EnvKeySpec, ...] = (
         targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
     ),
     EnvKeySpec(
+        key=VarsEnum.WEB_PORT,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
         key=VarsEnum.APP_IMAGE,
         mandatory=True,
         targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
@@ -349,6 +377,24 @@ DEPLOY_SCHEMA: tuple[EnvKeySpec, ...] = (
         mandatory=False,
         default=None,
         targets=frozenset({EnvTarget.DOTENV_DEPLOY_SECRETS, EnvTarget.GH_ACTIONS_SECRET}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.DOCKERFILE,
+        mandatory=False,
+        default="docker/Dockerfile",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.STORAGE_MANAGER_IMAGE,
+        mandatory=False,
+        default="ghcr.io/beejones/protected-container-storage-manager:latest",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.STORAGE_MANAGER_DOCKERFILE,
+        mandatory=False,
+        default="docker/storage-manager/Dockerfile",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
     ),
     EnvKeySpec(
         key=VarsEnum.APP_CPU_CORES,
@@ -409,6 +455,90 @@ DEPLOY_SCHEMA: tuple[EnvKeySpec, ...] = (
         mandatory=False,
         default="false",
         targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.UBUNTU_SSH_HOST,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.UBUNTU_REMOTE_DIR,
+        mandatory=False,
+        default="/opt/protected-container",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.UBUNTU_COMPOSE_FILES,
+        mandatory=False,
+        default="docker/docker-compose.yml,docker/docker-compose.ubuntu.yml",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.UBUNTU_BUILD_PUSH,
+        mandatory=False,
+        default="true",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.UBUNTU_SYNC_SECRETS,
+        mandatory=False,
+        default="true",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.PORTAINER_HTTPS_PORT,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.PORTAINER_WEBHOOK_INSECURE,
+        mandatory=False,
+        default="false",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY}),
+    ),
+    EnvKeySpec(
+        key=SecretsEnum.PORTAINER_WEBHOOK_URL,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.DOTENV_DEPLOY_SECRETS}),
+    ),
+    EnvKeySpec(
+        key=SecretsEnum.PORTAINER_WEBHOOK_TOKEN,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY_SECRETS}),
+    ),
+    EnvKeySpec(
+        key=SecretsEnum.PORTAINER_ACCESS_TOKEN,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY_SECRETS}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.PORTAINER_STACK_NAME,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.PORTAINER_ENDPOINT_ID,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.CADDY_PROXY_DIR,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.STORAGE_MANAGER_API_URL,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY}),
     ),
     EnvKeySpec(
         key=VarsEnum.BASIC_AUTH_USER,

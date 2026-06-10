@@ -35,9 +35,13 @@ def test_secrets_schema_keys_not_in_runtime_schema() -> None:
     assert SecretsEnum.AUTHENTIK_SECRET_KEY not in runtime_keys
     assert SecretsEnum.AUTHENTIK_POSTGRESQL__PASSWORD not in runtime_keys
     assert SecretsEnum.AUTHENTIK_BOOTSTRAP_TOKEN not in runtime_keys
+    assert SecretsEnum.PORTAINER_WEBHOOK_TOKEN not in runtime_keys
+    assert SecretsEnum.PORTAINER_ACCESS_TOKEN not in runtime_keys
     assert SecretsEnum.AUTHENTIK_SECRET_KEY in deploy_secret_keys
     assert SecretsEnum.AUTHENTIK_POSTGRESQL__PASSWORD in deploy_secret_keys
     assert SecretsEnum.AUTHENTIK_BOOTSTRAP_TOKEN in deploy_secret_keys
+    assert SecretsEnum.PORTAINER_WEBHOOK_TOKEN in deploy_secret_keys
+    assert SecretsEnum.PORTAINER_ACCESS_TOKEN in deploy_secret_keys
 
 def test_secrets_schema_validation(tmp_path: Path) -> None:
     """Validate .env.secrets content against SECRETS_SCHEMA."""

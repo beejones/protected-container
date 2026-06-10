@@ -446,6 +446,7 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 
 - `EDGE_AUTH_MODE` defaults to `basic`, preserving Basic Auth rollback until OIDC mode is explicitly enabled.
 - Authentik deploy-time vars and secrets are schema-defined. Secrets include `AUTHENTIK_SECRET_KEY`, `AUTHENTIK_POSTGRESQL__PASSWORD`, `AUTHENTIK_BOOTSTRAP_PASSWORD_HASH`, `AUTHENTIK_BOOTSTRAP_TOKEN`, `AUTHENTIK_API_TOKEN`, SMTP password, and social provider client secrets.
+- Ubuntu and Portainer deploy keys used by `ubuntu_deploy.py` are schema-defined alongside the OIDC keys so `.env.deploy.example` and `.env.deploy.secrets.example` can be validated against the same source of truth.
 - `AUTH_APPROVER_EMAIL` is resolved from explicit env first and falls back to `ACME_EMAIL`; the production approver address remains an environment value rather than a hardcoded repo default.
 - Approved users live in Authentik group/application policy state. `AUTH_POLICY` names the approved-user group, and `scripts/deploy/auth_users.py` provides `list`, `add`, `remove`, `sync`, and `--dry-run` operations against Authentik's documented user/group API.
 - The provisioning wrapper logs action, status, user email, and group details only. API tokens and provider/signing/session secrets are never printed by the script.
@@ -463,6 +464,7 @@ The exact outpost service name, auth host, copied header casing, trusted proxy s
 ### Verification
 
 - [x] `source .venv/bin/activate && pytest -q tests/pytests/test_auth_users.py tests/pytests/test_env_schema.py tests/pytests/test_env_schema_secrets.py`
+- [x] `source .venv/bin/activate && python -m pytest -q tests/pytests/test_env_schema.py tests/pytests/test_env_schema_secrets.py` validates the tracked env example files and OIDC cross-field contract.
 - [x] `source .venv/bin/activate && python scripts/deploy/validate_env.py --runtime out/tmp/phase3.env --deploy out/tmp/phase3.env.deploy` with placeholder OIDC values and placeholder Authentik secrets exported in-process.
 
 ### Files Likely Touched
