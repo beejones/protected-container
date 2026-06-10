@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.7] - 2026-06-10
+
+### Git
+
+- Last git ref: [`41615a4`](https://github.com/beejones/protected-container/commit/41615a4e476b3abe1c99fe39fc6f5668d0033fc0)
+
+### New Capabilities
+
+- Added Ubuntu deploy convergence for the shared Portainer control plane so Portainer is kept on the central Caddy network with the documented Caddy-only ingress shape.
+- Clarified Ubuntu platform prerequisites, upstream container hook responsibilities, and Portainer API/webhook authentication through the Caddy-routed Portainer URL.
+
+### Fixed Bugs
+
+- Fixed Portainer outages where the container was running but unreachable from Caddy because it was missing the `caddy` network or still used stale direct host port bindings.
+- Fixed Ubuntu deploys so central Caddy is refreshed during deploy and stale Authentik/OIDC edge-auth deploy keys fail before remote work when Basic Auth is the active supported path.
+- Fixed deploy logging so new git refs can record the current `APP_VERSION`, while repeated deploys of the same git ref reuse the version already recorded in the version log.
+
+### Touched Models
+
+- Version-log CSV versioning contract.
+- Ubuntu deploy platform/control-plane contract.
+- Portainer API/webhook auth contract.
+
 ## [0.2.5] - 2026-06-09
 
 ### New Capabilities
