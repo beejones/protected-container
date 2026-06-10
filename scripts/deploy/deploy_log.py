@@ -185,14 +185,6 @@ def _read_existing_deploy_rows(csv_path: Path) -> list[list[str]]:
     return [_normalize_existing_row(row) for row in rows]
 
 
-def _raise_missing_version_record(git_ref: str) -> None:
-    """Fail when deploy is missing a post-merge version row for a git ref."""
-    raise RuntimeError(
-        f"version_log.csv is missing a version row for git ref {git_ref}. "
-        "Run the post-merge version-log command before deploying this git ref."
-    )
-
-
 def require_version_record_for_deploy(
     *,
     repo_root: Path,

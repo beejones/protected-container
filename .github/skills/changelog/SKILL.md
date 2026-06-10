@@ -7,9 +7,9 @@ description: "Use when: updating CHANGELOG.md, preparing the next APP_VERSION ta
 
 ## Purpose
 
-Use this skill from the merge workflow before a PR is created, updated for final review, or merged into `main`. It turns the PR report into release notes, prepares the next app-version changelog entry, records the latest git ref for traceability, and records the models touched by the change.
+Use this skill from the merge workflow before a PR is created, updated for final review, or merged into `main`. It turns the PR report into release notes, records the latest git ref for traceability, and records the models touched by the change.
 
-In `_protected-container`, `/changelog` owns the target version entry in `CHANGELOG.md`; it does **not** bump `.env` before merge. The post-merge version-log command owns the actual `APP_VERSION` bump after the git ref has changed, then records that merged ref in `out/deploy/version_log.csv`. `ubuntu_deploy.py` only verifies and reuses the recorded version for deploys of the same git ref.
+In `_protected-container`, `/changelog` owns release-note quality in `CHANGELOG.md`; deploy/version logging owns `out/deploy/version_log.csv`. `ubuntu_deploy.py` records the current git ref with the current `APP_VERSION`, reuses the recorded version for repeat deploys of the same git ref, and does not create or validate changelog entries.
 
 `CHANGELOG.md` is the correct conventional filename for release notes in this repo. Use the root `CHANGELOG.md` file. If it is empty, initialize it with:
 
@@ -25,23 +25,23 @@ All notable changes to this project will be documented in this file.
 - The implementation and validation work is complete enough for merge preparation.
 - Do not read `.env.secrets` or `.env.deploy.secrets`.
 - Use the root `.env` only for `APP_VERSION`.
-- Remember that `.env*` is ignored by default in this repo. Do not force-add `.env`; `/changelog` must leave `.env` unchanged so the post-merge version-log command can bump it exactly once after the git ref changes.
+- Remember that `.env*` is ignored by default in this repo. Do not force-add `.env`; if a version bump is needed, make it an explicit local versioning decision rather than inferring it from `version_log.csv` or `CHANGELOG.md`.
 
 If the PR report is stale, regenerate it before writing release notes. If the version class, latest git ref, GitHub commit URL, or touched models are unclear, ask the user before editing the changelog.
 
 ## Version Target
 
-Derive the target version from the current root `.env` exactly once per PR that will merge to `main`, but do not write the target version back to `.env` during `/changelog`.
+Use the current root `.env` `APP_VERSION` as the changelog version unless the user explicitly asks for a version bump.
 
 - Default to a patch bump, for example `0.11.10` -> `0.11.11`.
 - Use a minor bump for a substantial new user-facing capability or API expansion.
 - Use a major bump only for intentional breaking behavior or migration requirements.
 - If `APP_VERSION` is missing, duplicated, or not valid `x.y.z` semver, stop and report the blocker.
 - If the branch already contains a changelog entry for the same PR, update the existing entry instead of choosing another version.
-- If the branch is rebased or updated from `main` and another merge consumed the target version, bump to the next available version and update the changelog heading.
-- The target version must be the version that `python scripts/deploy/deploy_log.py --record-merge` will write after merge.
+- Do not infer a next version from `out/deploy/version_log.csv` or from previous `CHANGELOG.md` headings.
+- The changelog version should match the `APP_VERSION` that deploy/version logging will read for the current git ref.
 
-Verify the local pre-merge baseline after editing release notes. This value should still be the previous version:
+Verify the local version after editing release notes:
 
 ```bash
 grep '^APP_VERSION=' .env
@@ -133,7 +133,7 @@ Use the PR report as the primary source. Use commits and diffs only to verify ac
 
 The changelog step is complete when:
 
-- Root `.env` still has the previous valid `APP_VERSION` baseline; the target bump is reserved for the post-merge version-log command.
+- Root `.env` has the intended valid `APP_VERSION` for the changelog entry.
 - Root `CHANGELOG.md` has a versioned entry dated with the merge preparation date.
 - The changelog entry includes a PR link when one is available.
 - The changelog entry includes a `### Git` section with the last git ref linked to GitHub.
