@@ -17,6 +17,7 @@ from scripts.deploy.ubuntu_deploy import (
     collect_storage_manager_registrations,
     default_portainer_https_port,
     extract_stack_images,
+    find_unsupported_edge_auth_deploy_keys,
     ghcr_login_pull_remote_cmd,
     ghcr_images_from_stack,
     parse_boolish,
@@ -28,6 +29,7 @@ from scripts.deploy.ubuntu_deploy import (
     rewrite_rendered_paths_for_remote,
     rewrite_staging_container_names_for_portainer,
     stack_has_service,
+    validate_no_unsupported_edge_auth_deploy_keys,
     main,
     read_deploy_key,
     read_deploy_secret_key,
@@ -123,6 +125,32 @@ def test_build_ssh_cmd_basic():
 def test_build_ssh_connectivity_cmd_basic():
     cmd = build_ssh_connectivity_cmd(host="user@host")
     assert cmd == ["ssh", "user@host", "echo SSH_OK"]
+
+
+def test_find_unsupported_edge_auth_deploy_keys_reports_authentik_leftovers(tmp_path: Path):
+    (tmp_path / ".env.deploy").write_text(
+        "\n".join(
+            [
+                "PUBLIC_DOMAIN=protected-container.example.com",
+                "EDGE_AUTH_MODE=oidc",
+                "AUTH_POLICY=protected-container-users",
+                "AUTHENTIK_PUBLIC_DOMAIN=auth.example.com",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    out = find_unsupported_edge_auth_deploy_keys(repo_root=tmp_path)
+
+    assert out == ["AUTHENTIK_PUBLIC_DOMAIN", "AUTH_POLICY", "EDGE_AUTH_MODE"]
+
+
+def test_validate_no_unsupported_edge_auth_deploy_keys_fails_before_remote_work(tmp_path: Path):
+    (tmp_path / ".env.deploy").write_text("EDGE_AUTH_MODE=oidc\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="Remove unsupported Authentik/OIDC edge-auth key"):
+        validate_no_unsupported_edge_auth_deploy_keys(repo_root=tmp_path)
 
 
 def test_should_fallback_to_remote_compose_on_portainer_init_timeout():
@@ -562,6 +590,51 @@ def test_is_portainer_access_token_valid_false_on_401(monkeypatch):
         )
         is False
     )
+
+
+def test_is_portainer_access_token_valid_retries_transient_bad_gateway(monkeypatch):
+    class BadGatewayResponse:
+        status_code = 502
+        text = "Bad Gateway"
+
+        def raise_for_status(self):
+            raise RuntimeError("should not raise before retrying")
+
+        def json(self):
+            return {}
+
+    class OkResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [{"Id": 1, "Name": "local"}]
+
+    calls: list[str] = []
+
+    def fake_get(url, headers, verify, timeout):
+        calls.append(url)
+        if len(calls) == 1:
+            return BadGatewayResponse()
+        return OkResponse()
+
+    monkeypatch.setattr("scripts.deploy.portainer_helpers.requests.get", fake_get)
+    monkeypatch.setattr("scripts.deploy.portainer_helpers.time.sleep", lambda seconds: None)
+
+    assert (
+        is_portainer_access_token_valid(
+            host="ronny@192.168.1.45",
+            https_port=9943,
+            insecure=True,
+            access_token="token-123",
+            retry_count=2,
+            retry_delay_seconds=0,
+        )
+        is True
+    )
+    assert len(calls) == 2
 
 
 def test_is_portainer_access_token_valid_surfaces_portainer_message(monkeypatch):

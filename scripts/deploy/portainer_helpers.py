@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+import time
 from typing import Literal
 
 import requests
@@ -343,6 +344,8 @@ def is_portainer_access_token_valid(
     https_port: int,
     insecure: bool,
     access_token: str,
+    retry_count: int = 6,
+    retry_delay_seconds: float = 5.0,
 ) -> bool:
     """Return whether the provided Portainer access token is currently valid.
 
@@ -357,18 +360,42 @@ def is_portainer_access_token_valid(
     hostname = extract_ssh_hostname(host).strip()
     base_url = f"https://{hostname}:{https_port}"
 
-    resp = requests.get(f"{base_url}/api/endpoints", headers=headers, verify=not insecure, timeout=20)
-    if int(resp.status_code) == 401:
-        return False
-    resp.raise_for_status()
+    attempts = max(1, int(retry_count))
+    transient_status_codes = {502, 503, 504}
+    last_transient_error = ""
 
-    payload = resp.json()
-    if not isinstance(payload, list):
-        error_text = _format_portainer_api_error(payload)
-        if error_text:
-            raise SystemExit(f"Portainer /api/endpoints returned an unexpected payload: {error_text}")
-        raise SystemExit("Unexpected Portainer /api/endpoints response format")
-    return True
+    for attempt_index in range(attempts):
+        try:
+            resp = requests.get(f"{base_url}/api/endpoints", headers=headers, verify=not insecure, timeout=20)
+        except requests.RequestException as exc:
+            last_transient_error = str(exc)
+            if attempt_index < attempts - 1:
+                time.sleep(retry_delay_seconds)
+                continue
+            raise SystemExit(f"Portainer API did not become ready after {attempts} attempt(s): {last_transient_error}")
+
+        status_code = int(resp.status_code)
+        if status_code == 401:
+            return False
+        if status_code in transient_status_codes:
+            details = str(getattr(resp, "text", "") or "").strip().replace("\n", " ")[:200]
+            last_transient_error = f"HTTP {status_code}" + (f": {details}" if details else "")
+            if attempt_index < attempts - 1:
+                time.sleep(retry_delay_seconds)
+                continue
+            raise SystemExit(f"Portainer API did not become ready after {attempts} attempt(s): {last_transient_error}")
+
+        resp.raise_for_status()
+
+        payload = resp.json()
+        if not isinstance(payload, list):
+            error_text = _format_portainer_api_error(payload)
+            if error_text:
+                raise SystemExit(f"Portainer /api/endpoints returned an unexpected payload: {error_text}")
+            raise SystemExit("Unexpected Portainer /api/endpoints response format")
+        return True
+
+    raise SystemExit(f"Portainer API did not become ready after {attempts} attempt(s): {last_transient_error}")
 
 
 def build_portainer_webhook_urls_from_token(*, host: str, https_port: int, webhook_token: str) -> list[str]:
