@@ -439,20 +439,34 @@ def _extract_container_names(stack_content: str) -> list[str]:
             names.append(container_name)
     return names
 
+
 def portainer_ensure_running_remote_cmd(*, https_port: int) -> str:
     return (
+        "set -e; "
         "docker network inspect caddy >/dev/null 2>&1 || docker network create caddy >/dev/null; "
-        "if docker ps --format '{{.Names}}' | grep -Fxq portainer; then "
-        "echo '[ubuntu-deploy] Portainer already running'; "
-        "elif docker ps -a --format '{{.Names}}' | grep -Fxq portainer; then "
-        "echo '[ubuntu-deploy] Starting existing Portainer container'; "
-        "docker start portainer >/dev/null; "
-        "else "
-        "echo '[ubuntu-deploy] Creating Portainer container'; "
-        "docker volume create portainer_data >/dev/null && "
+        "docker volume create portainer_data >/dev/null; "
+        "docker pull portainer/portainer-ce:latest >/dev/null; "
+        "desired_image_id=$(docker image inspect --format '{{.Id}}' portainer/portainer-ce:latest); "
+        "run_portainer() { "
         f"docker run -d --name portainer --restart=unless-stopped -p 8000:8000 -p {https_port}:9443 "
         "-v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data "
         "portainer/portainer-ce:latest >/dev/null; "
+        "}; "
+        "if docker ps -a --format '{{.Names}}' | grep -Fxq portainer; then "
+        "existing_image_id=$(docker inspect --format '{{.Image}}' portainer 2>/dev/null || true); "
+        "if [ \"$existing_image_id\" != \"$desired_image_id\" ]; then "
+        "echo '[ubuntu-deploy] Updating Portainer to latest image'; "
+        "docker rm -f portainer >/dev/null; "
+        "run_portainer; "
+        "elif docker ps --format '{{.Names}}' | grep -Fxq portainer; then "
+        "echo '[ubuntu-deploy] Portainer already running with latest image'; "
+        "else "
+        "echo '[ubuntu-deploy] Starting existing Portainer container'; "
+        "docker start portainer >/dev/null; "
+        "fi; "
+        "else "
+        "echo '[ubuntu-deploy] Creating Portainer container'; "
+        "run_portainer; "
         "fi; "
         "docker network connect caddy portainer >/dev/null 2>&1 || true"
     )

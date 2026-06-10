@@ -53,7 +53,7 @@ Then run the bash script:
 bash scripts/deploy/ubuntu_deploy_proxy.sh
 ```
 
-*(This script automatically deploys to `~/containers/central-proxy` and ensures the external `caddy` docker network is created on the remote host.)*
+*(This script syncs `docker/proxy/`, recreates the `central-proxy` container so the latest Caddyfile is mounted, validates the active config, and ensures the external `caddy` docker network is created on the remote host.)*
 
 ### 2. Stand up Portainer (Admin UI)
 
@@ -99,7 +99,7 @@ python scripts/deploy/ubuntu_deploy.py \
   --sync-secrets
 ```
 
-This pushes the image, syncs `docker-compose.yml` and `.env` files, and triggers Portainer to pull and restart the stack.
+This pushes the image, syncs `docker-compose.yml` and `.env` files, refreshes the central Caddy proxy, ensures Portainer is running on `portainer/portainer-ce:latest`, and triggers Portainer to pull and restart the stack. If an existing `portainer` container was created from an older image, the deploy script recreates it with the same `portainer_data` volume before using the Portainer API or webhook.
 
 ## Troubleshooting Caddy
 

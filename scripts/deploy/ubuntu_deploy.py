@@ -374,20 +374,7 @@ def stack_has_service(*, stack_content: str, service_name: str) -> bool:
 
 
 def portainer_ensure_running_remote_cmd(*, https_port: int) -> str:
-    return (
-        "if docker ps --format '{{.Names}}' | grep -Fxq portainer; then "
-        "echo '[ubuntu-deploy] Portainer already running'; "
-        "elif docker ps -a --format '{{.Names}}' | grep -Fxq portainer; then "
-        "echo '[ubuntu-deploy] Starting existing Portainer container'; "
-        "docker start portainer >/dev/null; "
-        "else "
-        "echo '[ubuntu-deploy] Creating Portainer container'; "
-        "docker volume create portainer_data >/dev/null && "
-        f"docker run -d --name portainer --restart=unless-stopped -p 8000:8000 -p {https_port}:9443 "
-        "-v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data "
-        "portainer/portainer-ce:latest >/dev/null; "
-        "fi"
-    )
+    return portainer_helpers.portainer_ensure_running_remote_cmd(https_port=https_port)
 
 
 def ghcr_login_pull_remote_cmd(*, image: str, username: str, token: str) -> str:
@@ -1128,29 +1115,19 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                 action=f"Failed remote GHCR login/pull for image {image}",
             )
 
-    log_step("Ensuring Central Caddy Proxy is running", icon="🌐")
-    # Check if the global proxy container exists
-    caddy_check_cmd = build_ssh_cmd(
-        host=resolved_host,
-        remote_command="docker ps -a --format '{{.Names}}' | grep -Fxq central-proxy"
-    )
-    result = subprocess.run(caddy_check_cmd, check=False, capture_output=True, text=True)
-    if result.returncode != 0:
-        log_info("Central proxy missing. Deploying via ubuntu_deploy_proxy.sh...")
-        proxy_script = repo_root / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh"
-        if proxy_script.exists():
-            try:
-                subprocess.run(["bash", str(proxy_script)], check=True)
-            except subprocess.CalledProcessError as exc:
-                detail = _subprocess_error_text(exc)
-                message = "Failed to deploy central proxy via ubuntu_deploy_proxy.sh"
-                if detail:
-                    message = f"{message}: {detail}"
-                raise SystemExit(message)
-        else:
-            log_info(f"Warning: {proxy_script} not found. Cannot auto-deploy proxy.", icon="⚠️")
+    log_step("Refreshing Central Caddy Proxy", icon="🌐")
+    proxy_script = repo_root / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh"
+    if proxy_script.exists():
+        try:
+            subprocess.run(["bash", str(proxy_script)], check=True)
+        except subprocess.CalledProcessError as exc:
+            detail = _subprocess_error_text(exc)
+            message = "Failed to refresh central proxy via ubuntu_deploy_proxy.sh"
+            if detail:
+                message = f"{message}: {detail}"
+            raise SystemExit(message)
     else:
-        log_info("Central proxy is already running.")
+        log_info(f"Warning: {proxy_script} not found. Cannot auto-refresh proxy.", icon="⚠️")
 
     used_remote_compose_fallback = False
 
