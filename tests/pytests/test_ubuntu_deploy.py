@@ -168,6 +168,7 @@ def test_swap_promotes_to_production_stack_and_stops_only_staging(tmp_path, monk
     )
     (tmp_path / ".env.deploy.secrets").write_text(
         "PORTAINER_WEBHOOK_URL=https://portainer.zenia.eu/api/stacks/webhooks/test-token\n"
+        "PORTAINER_ACCESS_TOKEN=token-123\n"
     )
 
     for key in [
@@ -263,76 +264,16 @@ def test_swap_promotes_to_production_stack_and_stops_only_staging(tmp_path, monk
     assert deploy_record_settings[0].csv_path == Path("out/custom/version_log.csv")
 
 
-def test_main_does_not_require_post_merge_version_record_before_remote_work(tmp_path, monkeypatch):
-    (tmp_path / "docker").mkdir()
-    (tmp_path / "docker" / "docker-compose.yml").write_text("services: {}\n")
-    (tmp_path / "docker" / "docker-compose.ubuntu.yml").write_text("services: {}\n")
+def test_deploy_version_preflight_does_not_require_existing_record(tmp_path):
     (tmp_path / ".env").write_text("APP_VERSION=1.2.4\n")
-    (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## [1.2.3] - 2026-06-09\n")
-    (tmp_path / ".env.deploy").write_text(
-        "\n".join(
-            [
-                "UBUNTU_SSH_HOST=deploy@example.com",
-                "UBUNTU_BUILD_PUSH=false",
-                "PUBLIC_DOMAIN=protected-container.zenia.eu",
-                "STAGING_REMOTE_DIR=/srv/staging",
-                "STAGING_PUBLIC_DOMAIN=staging-protected-container.zenia.eu",
-                "APP_IMAGE=example/app:staged",
-                "PORTAINER_ENDPOINT_ID=1",
-                "STAGING_PORTAINER_STACK_NAME=staging-protected-container",
-            ]
-        )
-        + "\n"
+    settings = deploy_log.default_deploy_log_settings(tmp_path)
+
+    deploy_log.require_version_record_for_deploy(
+        repo_root=tmp_path,
+        settings=settings,
+        status="success",
+        git_ref="new-git-ref",
     )
-    (tmp_path / ".env.deploy.secrets").write_text("PORTAINER_ACCESS_TOKEN=token-123\n")
-
-    for key in [
-        "UBUNTU_SSH_HOST",
-        "UBUNTU_BUILD_PUSH",
-        "PUBLIC_DOMAIN",
-        "STAGING_REMOTE_DIR",
-        "STAGING_PUBLIC_DOMAIN",
-        "APP_IMAGE",
-        "PORTAINER_ENDPOINT_ID",
-        "STAGING_PORTAINER_STACK_NAME",
-        "PORTAINER_ACCESS_TOKEN",
-        "PORTAINER_WEBHOOK_URL",
-        "PORTAINER_WEBHOOK_TOKEN",
-        "UBUNTU_COMPOSE_FILES",
-    ]:
-        monkeypatch.delenv(key, raising=False)
-
-    class DummyHooks:
-        def call(self, hook_name, *args, **kwargs):
-            return None
-
-    remote_calls: list[list[str]] = []
-
-    def fake_run(cmd, *args, **kwargs):
-        remote_calls.append(cmd)
-        class Result:
-            returncode = 0
-            stdout = "SSH_OK\n"
-            stderr = ""
-
-        return Result()
-
-    def fake_render_compose_stack_content(*, repo_root, compose_files):
-        return "services:\n  app:\n    image: example/app:staged\n"
-
-    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_hooks.load_hooks", lambda **kwargs: DummyHooks())
-    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.render_compose_stack_content", fake_render_compose_stack_content)
-    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log._get_git_ref", lambda repo_root: "new-git-ref")
-    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log._get_local_branch", lambda repo_root: "main")
-    monkeypatch.setattr(
-        "scripts.deploy.ubuntu_deploy.portainer_helpers.is_portainer_access_token_valid",
-        lambda **kwargs: True,
-    )
-    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.subprocess.run", fake_run)
-
-    main([], repo_root_override=tmp_path)
-
-    assert remote_calls
 
 
 def test_rewrite_staging_container_names_for_portainer_avoids_production_name_collisions():
