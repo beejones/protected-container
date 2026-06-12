@@ -9,7 +9,7 @@ description: "Use when: updating CHANGELOG.md, preparing the next APP_VERSION ta
 
 Use this skill from the merge workflow before a PR is created, updated for final review, or merged into `main`. It turns the PR report into release notes, records the latest git ref for traceability, and records the models touched by the change.
 
-In `_protected-container`, `/changelog` owns release-note quality in `CHANGELOG.md`; deploy/version logging owns `out/deploy/version_log.csv`. `ubuntu_deploy.py` records the current git ref with the current `APP_VERSION`, reuses the recorded version for repeat deploys of the same git ref, and does not create or validate changelog entries.
+In `_protected-container`, `/changelog` owns release-note quality in `CHANGELOG.md`; deploy/version logging owns `out/deploy/version_log.csv`. `ubuntu_deploy.py` records the current git ref, reuses the recorded version for repeat deploys of the same git ref, and bumps `.env` `APP_VERSION` for a new successful git ref unless `.env` is already ahead of the newest successful version-log row. Deploy logging does not create or validate changelog entries.
 
 `CHANGELOG.md` is the correct conventional filename for release notes in this repo. Use the root `CHANGELOG.md` file. If it is empty, initialize it with:
 
@@ -39,7 +39,7 @@ Use the current root `.env` `APP_VERSION` as the changelog version unless the us
 - If `APP_VERSION` is missing, duplicated, or not valid `x.y.z` semver, stop and report the blocker.
 - If the branch already contains a changelog entry for the same PR, update the existing entry instead of choosing another version.
 - Do not infer a next version from `out/deploy/version_log.csv` or from previous `CHANGELOG.md` headings.
-- The changelog version should match the `APP_VERSION` that deploy/version logging will read for the current git ref.
+- The changelog version should match the `APP_VERSION` that deploy/version logging will record for the current git ref.
 
 Verify the local version after editing release notes:
 

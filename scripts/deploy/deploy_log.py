@@ -6,8 +6,9 @@ image, and status.
 Newest records are stored directly under the CSV header.
 
 For a git ref that already has a successful record, later records reuse the
-version already recorded in the version log. For a new git ref, the log records
-the current APP_VERSION without inferring a future version from existing rows.
+version already recorded in the version log. For a new successful git ref, the
+log advances APP_VERSION from the newest successful version-log row before the
+new row is written.
 """
 
 from __future__ import annotations
@@ -48,6 +49,7 @@ LEGACY_CSV_COLUMNS = [
 
 _SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 _GIT_REF_COLUMN = CSV_COLUMNS.index("git_ref")
+_VERSION_COLUMN = CSV_COLUMNS.index("version")
 _STATUS_COLUMN = CSV_COLUMNS.index("status")
 _MERGE_TARGET = "merge"
 
@@ -99,12 +101,17 @@ def _read_app_version(repo_root: Path) -> str:
     return str(values.get("APP_VERSION") or "0.0.0").strip() or "0.0.0"
 
 
-def _increment_patch(version: str) -> str:
-    """Increment the patch component of a semver string."""
+def _parse_semver(version: str) -> tuple[int, int, int]:
+    """Return semver components for a valid x.y.z version."""
     match = _SEMVER_RE.match(version.strip())
     if not match:
-        raise RuntimeError("APP_VERSION must be valid x.y.z semver before recording a merged git ref.")
-    major, minor, patch = int(match.group(1)), int(match.group(2)), int(match.group(3))
+        raise RuntimeError("APP_VERSION must be valid x.y.z semver before recording a git ref.")
+    return int(match.group(1)), int(match.group(2)), int(match.group(3))
+
+
+def _increment_patch(version: str) -> str:
+    """Increment the patch component of a semver string."""
+    major, minor, patch = _parse_semver(version)
     return f"{major}.{minor}.{patch + 1}"
 
 
@@ -159,8 +166,57 @@ def _successful_deploy_version_for_git_ref(*, git_ref: str, existing_rows: list[
         row_git_ref = str(row[_GIT_REF_COLUMN] or "").strip()
         status = str(row[_STATUS_COLUMN] or "").strip()
         if status == "success" and row_git_ref == git_ref:
-            return str(row[CSV_COLUMNS.index("version")] or "").strip()
+            return str(row[_VERSION_COLUMN] or "").strip()
     return ""
+
+
+def _newest_successful_version(*, existing_rows: list[list[str]]) -> str:
+    """Return the newest successful version recorded in the version log."""
+    for row in existing_rows:
+        if len(row) < len(CSV_COLUMNS):
+            continue
+        status = str(row[_STATUS_COLUMN] or "").strip()
+        version = str(row[_VERSION_COLUMN] or "").strip()
+        if status == "success" and version:
+            return version
+    return ""
+
+
+def _next_version_after_previous_success(*, current_version: str, previous_version: str) -> str:
+    """Return the version to record for a new git ref after a previous success."""
+    current_semver = _parse_semver(current_version)
+    previous_semver = _parse_semver(previous_version)
+    if current_semver > previous_semver:
+        return current_version.strip()
+    return _increment_patch(previous_version)
+
+
+def _resolve_successful_record_version(
+    *,
+    repo_root: Path,
+    git_ref: str,
+    current_version: str,
+    existing_rows: list[list[str]],
+) -> str:
+    """Resolve and persist the version for a successful merge or deploy row."""
+    existing_version = _successful_deploy_version_for_git_ref(
+        git_ref=git_ref,
+        existing_rows=existing_rows,
+    )
+    if existing_version:
+        return existing_version
+
+    previous_version = _newest_successful_version(existing_rows=existing_rows)
+    if not previous_version:
+        _validate_app_version(current_version)
+        return current_version
+
+    next_version = _next_version_after_previous_success(
+        current_version=current_version,
+        previous_version=previous_version,
+    )
+    _write_app_version(repo_root, next_version)
+    return next_version
 
 
 def _normalize_existing_row(row: list[str]) -> list[str]:
@@ -254,13 +310,13 @@ def append_deploy_record_with_settings(
 
     existing_rows = _read_existing_deploy_rows(csv_path)
 
-    if settings.versioning_enabled and version is None:
-        existing_version = _successful_deploy_version_for_git_ref(
+    if settings.versioning_enabled and version is None and status == "success":
+        resolved_version = _resolve_successful_record_version(
+            repo_root=repo_root,
             git_ref=resolved_git_ref,
+            current_version=resolved_version,
             existing_rows=existing_rows,
         )
-        if existing_version:
-            resolved_version = existing_version
 
     new_row = [
         timestamp,
@@ -291,7 +347,7 @@ def append_merge_record(
     local_branch: str | None = None,
     version: str | None = None,
 ) -> Path:
-    """Record the current app version for a git ref unless that ref is already logged."""
+    """Record the resolved app version for a git ref unless that ref is already logged."""
     resolved_settings = settings if settings is not None else default_deploy_log_settings(repo_root)
     csv_path = _resolve_csv_path(repo_root=repo_root, csv_path=resolved_settings.csv_path)
     existing_rows = _read_existing_deploy_rows(csv_path)
@@ -299,10 +355,8 @@ def append_merge_record(
     if _successful_deploy_version_for_git_ref(git_ref=resolved_git_ref, existing_rows=existing_rows):
         return csv_path
 
-    current_version = _read_app_version(repo_root)
-    resolved_version = version if version is not None else current_version
-    if resolved_settings.versioning_enabled:
-        _validate_app_version(resolved_version)
+    if resolved_settings.versioning_enabled and version is not None:
+        _validate_app_version(version)
 
     written_path = append_deploy_record_with_settings(
         repo_root=repo_root,
@@ -314,7 +368,7 @@ def append_merge_record(
         status="success",
         git_ref=resolved_git_ref,
         local_branch=local_branch,
-        version=resolved_version,
+        version=version,
     )
     return written_path
 

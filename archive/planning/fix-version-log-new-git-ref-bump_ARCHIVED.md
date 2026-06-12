@@ -10,23 +10,24 @@
 
 ## Checkable Task Overview
 
-- [ ] Phase 0 cleanup: inspect `scripts/deploy/deploy_log.py`, its tests, and nearby docs for stale versioning assumptions.
-- [ ] Phase 0 cleanup: confirm no duplicated version-selection helper should be extracted before the bug fix.
-- [ ] Phase 0 cleanup: remove or update obsolete text revealed by the new versioning contract.
-- [ ] Phase 0 cleanup: keep Python typing strict and avoid new loose payload types.
-- [ ] Phase 1 bug proof: add a regression test that fails when a new successful deploy git ref reuses the previous version.
-- [ ] Phase 2 implementation: update deploy-log version selection so new successful git refs bump `.env` patch before the row is written.
-- [ ] Phase 2 implementation: preserve same-git-ref reuse and disabled-versioning behavior.
-- [ ] Phase 3 docs: update deploy docs that currently say new git refs record the current `APP_VERSION`.
-- [ ] Phase 4 validation: run focused deploy-log tests.
-- [ ] Phase 4 validation: run the relevant typing guard scan on changed Python files.
-- [ ] Phase 4 validation: run a deploy-log CLI parse or focused deploy command check if needed.
+- [x] Phase 0 cleanup: inspect `scripts/deploy/deploy_log.py`, its tests, and nearby docs for stale versioning assumptions.
+- [x] Phase 0 cleanup: confirm no duplicated version-selection helper should be extracted before the bug fix.
+- [x] Phase 0 cleanup: remove or update obsolete text revealed by the new versioning contract.
+- [x] Phase 0 cleanup: keep Python typing strict and avoid new loose payload types.
+- [x] Phase 1 bug proof: add a regression test that fails when a new successful deploy git ref reuses the previous version.
+- [x] Phase 2 implementation: update deploy-log version selection so new successful git refs bump `.env` patch before the row is written.
+- [x] Phase 2 implementation: preserve same-git-ref reuse and disabled-versioning behavior.
+- [x] Phase 3 docs: update deploy docs that currently say new git refs record the current `APP_VERSION`.
+- [x] Phase 4 validation: run focused deploy-log tests.
+- [x] Phase 4 validation: run the relevant typing guard scan on changed Python files.
+- [x] Phase 4 validation: run a deploy-log CLI parse or focused deploy command check if needed.
 
 ## Affected Surfaces
 
 - Ubuntu deploy: `ubuntu_deploy.py` calls deploy logging after deploy completion.
 - Deploy version log: `scripts/deploy/deploy_log.py` owns `.env` `APP_VERSION` reads/writes and CSV rows.
 - Docs: `docs/deploy/STAGING.md` and `docs/deploy/HOOKS.md` describe the versioning contract.
+- Agent workflow docs: `.github/skills/changelog/SKILL.md` and `.github/skills/merge/SKILL.md` guide future version-log handling.
 - Tests: `tests/pytests/test_deploy_log.py` covers merge/deploy version-log behavior.
 
 Local Docker, Azure deploy, env schema, and deployment hooks are not expected to need behavior changes for this bug.
@@ -68,3 +69,8 @@ Local Docker, Azure deploy, env schema, and deployment hooks are not expected to
 ## Notes
 
 - The build-feature mode references `.github/skills/module-cleanup/SKILL.md`, but this repo does not currently contain that file. The available repo cleanup workflow is `.github/skills/code-cleanup/SKILL.md`, which chains `code-simplify` and `typed-code-generation`.
+- Regression proof: `source .venv/bin/activate && python -m pytest tests/pytests/test_deploy_log.py::TestAppendDeployRecord::test_new_successful_deploy_git_ref_bumps_patch_after_previous_success -x -v` failed before the production fix with `1.2.3` recorded instead of `1.2.4`, then passed after the fix.
+- Focused validation passed: `source .venv/bin/activate && python -m pytest tests/pytests/test_deploy_log.py -v` reported 34 passed.
+- Typing guard passed with no matches: `rg "\bAny\b|\bobject\b|TypeAlias\s*=\s*(dict|Dict|Mapping|MutableMapping)|dict\[str, object\]|Dict\[str, object\]|Mapping\[str, object\]|MutableMapping\[str, object\]|: dict\b|-> dict\b" scripts/deploy/deploy_log.py tests/pytests/test_deploy_log.py` returned exit code 1.
+- CLI parse check passed: `source .venv/bin/activate && python scripts/deploy/deploy_log.py --help`.
+- Local ignored state was corrected after the bad deploy: `.env` now has `APP_VERSION=0.2.7`, and the newest ignored `out/deploy/version_log.csv` production row for git ref `4f2972e7e8cc0872c9e2171d2c532399821fbb01` now records `0.2.7`.
