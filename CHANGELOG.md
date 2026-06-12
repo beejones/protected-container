@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Git
 
-- Last git ref: [`2bf5a27`](https://github.com/beejones/protected-container/commit/2bf5a27277f879f4a9975feb9ee49f1772aa89b9)
+- Last git ref: [`7633bc8`](https://github.com/beejones/protected-container/commit/7633bc899bf28f5e181cf682aaba03487f61e95c)
 
 ### New Capabilities
 
@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed Bugs
 
 - Fixed downstream Ubuntu deploys that vendor this toolkit as a submodule or temporary upstream checkout by passing the active deploy Python executable into the proxy refresh helper instead of requiring a toolkit-local `.venv`.
+- Fixed proxy refreshes from temporary upstream checkouts that include the proxy shell script and template but omit `preserve_caddy_routes.py`; route preservation now has a self-contained shell fallback.
 
 ### Touched Models
 
