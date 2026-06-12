@@ -17,8 +17,8 @@
 - [x] Phase 2 implementation: avoid hardcoding downstream app domains in toolkit source.
 - [x] Phase 3 validation: run focused Caddy/proxy tests.
 - [x] Phase 3 validation: run typing/shell syntax checks for changed files.
-- [ ] Phase 4 deploy: run `source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py --prod`.
-- [ ] Phase 4 live verification: confirm `stock-dashboard.zenia.eu`, `hermes.zenia.eu`, and `portainer.zenia.eu` no longer fail TLS.
+- [x] Phase 4 deploy: run `source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py --prod`.
+- [x] Phase 4 live verification: confirm `stock-dashboard.zenia.eu`, `hermes.zenia.eu`, and `portainer.zenia.eu` no longer fail TLS.
 
 ## Affected Surfaces
 
@@ -66,5 +66,7 @@ Commit `4f2972e7e8cc0872c9e2171d2c532399821fbb01` made the proxy refresh recreat
 - Remote Caddyfile evidence before the fix showed only `{$PUBLIC_DOMAIN}` / `protected-container` and `portainer.zenia.eu` routes; no `stock-dashboard` or `hermes` site blocks were present.
 - First attempted fix preserved routes in `ubuntu_deploy_proxy.sh`, but validation deploy showed the earlier app asset sync had already overwritten `docker/proxy/Caddyfile`. The final fix also excludes `docker/proxy/Caddyfile` from the general app asset sync.
 - Regression proof: `source .venv/bin/activate && python -m pytest tests/pytests/test_ubuntu_deploy.py::test_proxy_deploy_script_preserves_existing_shared_routes_before_sync -x -v` failed before the preservation fix.
-- Focused validation passed: `source .venv/bin/activate && python -m pytest tests/pytests/test_ubuntu_deploy.py::test_build_rsync_cmd_basic tests/pytests/test_ubuntu_deploy.py::test_build_rsync_cmd_includes_excludes_before_sources tests/pytests/test_ubuntu_deploy.py::test_proxy_deploy_script_preserves_existing_shared_routes_before_sync tests/pytests/test_caddy_register.py -v` reported 17 passed.
+- Focused validation passed: `source .venv/bin/activate && python -m pytest tests/pytests/test_caddy_register.py tests/pytests/test_ubuntu_deploy.py -v` reported 67 passed.
 - Shell/CLI validation passed: `bash -n scripts/deploy/ubuntu_deploy_proxy.sh` and `source .venv/bin/activate && python scripts/deploy/preserve_caddy_routes.py --help`.
+- Final deploy passed: `source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py --prod` completed successfully at `APP_VERSION=0.2.9` for git ref `cf5a1726671ac39471bcfe76c0cfbe2e6534ae27`.
+- Final live verification passed: `stock-dashboard.zenia.eu` and `hermes.zenia.eu` returned `HTTP/2 401` from Caddy Basic Auth, and `portainer.zenia.eu` returned `HTTP/2 200`.

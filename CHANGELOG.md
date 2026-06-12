@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.9] - 2026-06-12
+
+### Git
+
+- Last git ref: [`cf5a172`](https://github.com/beejones/protected-container/commit/cf5a1726671ac39471bcfe76c0cfbe2e6534ae27)
+
+### New Capabilities
+
+- Added shared Caddy route preservation during Ubuntu proxy refreshes so existing app routes survive central proxy redeploys.
+- Added deploy-log version resolution for new successful merge and Ubuntu deploy git refs, while preserving same-ref version reuse.
+
+### Fixed Bugs
+
+- Fixed a Caddy regression where refreshing `central-proxy` from the protected-container template erased other app routes, causing TLS failures for `stock-dashboard.zenia.eu` and `hermes.zenia.eu`.
+- Fixed deploy logging so a new successful git ref bumps `APP_VERSION` from the newest successful version-log row unless `.env` is already ahead.
+
+### Touched Models
+
+- Shared Caddy routing preservation contract.
+- Version-log CSV versioning contract.
+- `DeployLogSettings.versioning_enabled` behavior.
+
 ## [0.2.6] - 2026-06-10
 
 ### Git
