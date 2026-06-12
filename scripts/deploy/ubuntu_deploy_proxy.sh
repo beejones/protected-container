@@ -36,7 +36,30 @@ echo "[proxy-deploy] 🚀 Deploying Central Caddy Proxy to ${UBUNTU_SSH_HOST}...
 echo "[proxy-deploy] 📦 Syncing proxy configuration to ${PROXY_DIR}..."
 # Create directory in user's home folder (no sudo required)
 ssh "${UBUNTU_SSH_HOST}" "mkdir -p ${PROXY_DIR}"
-rsync -avz docker/proxy/ "${UBUNTU_SSH_HOST}:${PROXY_DIR}/"
+TMP_BASE="${TMPDIR:-${REPO_ROOT}/out/tmp}"
+mkdir -p "${TMP_BASE}"
+PRESERVE_TMP_DIR="$(mktemp -d "${TMP_BASE}/caddy-proxy.XXXXXX")"
+cleanup_preserve_tmp() {
+  rm -rf "${PRESERVE_TMP_DIR}"
+}
+trap cleanup_preserve_tmp EXIT
+
+REMOTE_CADDYFILE="${PRESERVE_TMP_DIR}/Caddyfile.remote"
+STAGED_PROXY_DIR="${PRESERVE_TMP_DIR}/proxy"
+if ssh "${UBUNTU_SSH_HOST}" "test -f ${PROXY_DIR}/Caddyfile"; then
+  echo "[proxy-deploy] 🧩 Preserving existing shared Caddy routes..."
+  ssh "${UBUNTU_SSH_HOST}" "cat ${PROXY_DIR}/Caddyfile" > "${REMOTE_CADDYFILE}"
+else
+  : > "${REMOTE_CADDYFILE}"
+fi
+
+source .venv/bin/activate
+rsync -a docker/proxy/ "${STAGED_PROXY_DIR}/"
+python scripts/deploy/preserve_caddy_routes.py \
+  --existing "${REMOTE_CADDYFILE}" \
+  --incoming docker/proxy/Caddyfile \
+  --output "${STAGED_PROXY_DIR}/Caddyfile"
+rsync -avz "${STAGED_PROXY_DIR}/" "${UBUNTU_SSH_HOST}:${PROXY_DIR}/"
 
 echo "[proxy-deploy] 🌐 Ensuring external 'caddy' network exists..."
 ssh "${UBUNTU_SSH_HOST}" "docker network inspect caddy >/dev/null 2>&1 || docker network create caddy"

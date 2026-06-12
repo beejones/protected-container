@@ -58,6 +58,27 @@ def test_build_rsync_cmd_basic():
     assert "user@host:/opt/protected-container/" in cmd
 
 
+def test_build_rsync_cmd_includes_excludes_before_sources():
+    cmd = build_rsync_cmd(
+        sources=[Path("/repo/docker")],
+        host="user@host",
+        remote_dir=Path("/opt/protected-container"),
+        exclude_patterns=("proxy/Caddyfile", "docker/proxy/Caddyfile"),
+    )
+
+    assert cmd == [
+        "rsync",
+        "-az",
+        "--mkpath",
+        "--exclude",
+        "proxy/Caddyfile",
+        "--exclude",
+        "docker/proxy/Caddyfile",
+        "/repo/docker",
+        "user@host:/opt/protected-container/",
+    ]
+
+
 def test_build_compose_config_cmd_with_multiple_files():
     cmd = build_compose_config_cmd(compose_files=["docker/docker-compose.yml", "docker/docker-compose.ubuntu.yml"])
     assert cmd == [
@@ -453,6 +474,17 @@ def test_proxy_deploy_script_force_recreates_caddy_to_flush_synced_caddyfile():
 
     assert "up -d --force-recreate --remove-orphans" in script_text
     assert "caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile" in script_text
+
+
+def test_proxy_deploy_script_preserves_existing_shared_routes_before_sync():
+    repo_root = Path(__file__).resolve().parents[2]
+    script_text = (repo_root / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh").read_text(encoding="utf-8")
+
+    assert "preserve_caddy_routes.py" in script_text
+    assert "--existing" in script_text
+    assert "--incoming" in script_text
+    assert "--output" in script_text
+    assert script_text.index("preserve_caddy_routes.py") < script_text.index("docker compose up")
 
 
 def test_main_refreshes_central_proxy_even_when_container_exists(tmp_path, monkeypatch):
