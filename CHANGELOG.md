@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.14] - 2026-06-12
+
+### Git
+
+- Last git ref: [`3c2078b`](https://github.com/beejones/protected-container/commit/3c2078b70cf8d0dacee193efc3ad815cd043c7f7)
+
+### New Capabilities
+
+- Added shared Caddy route preservation during Ubuntu proxy refreshes so existing downstream app routes survive protected-container deploys.
+- Added candidate validation before replacing the live shared Caddy proxy files or recreating `central-proxy`.
+- Added proxy-local `.env` generation so downstream hooks can rerun shared proxy Compose commands without manually exporting Caddy runtime values.
+- Added automatic version-log CSV migration to `timestamp,git_ref,version,status,target,local_branch,stack_name,domain,image`.
+
+### Fixed Bugs
+
+- Fixed shared Caddy regressions where protected-container deploys could erase, unprotect, or misroute stock-dashboard and Hermes site blocks.
+- Fixed proxy refreshes from downstream or temporary upstream checkouts by using the caller Python executable and an embedded route-preservation fallback when helper files are absent.
+- Fixed Caddy crash-loop and Hermes `--swap` failures caused by proxy Compose environment interpolation and Basic Auth hash parsing.
+- Fixed deploy logging so new successful git refs advance `APP_VERSION` once while repeated deploys of the same git ref reuse the recorded version.
+
+### Touched Models
+
+- Shared Caddy route preservation contract.
+- Ubuntu shared proxy refresh safety contract.
+- Downstream deployment hook compatibility contract.
+- Version-log CSV schema and migration contract.
+- `DeployLogSettings.versioning_enabled` behavior.
+
 ## [0.2.12] - 2026-06-12
 
 ### Git
