@@ -53,9 +53,8 @@ else
   : > "${REMOTE_CADDYFILE}"
 fi
 
-source .venv/bin/activate
 rsync -a docker/proxy/ "${STAGED_PROXY_DIR}/"
-python scripts/deploy/preserve_caddy_routes.py \
+"${PYTHON_BIN:-python3}" scripts/deploy/preserve_caddy_routes.py \
   --existing "${REMOTE_CADDYFILE}" \
   --incoming docker/proxy/Caddyfile \
   --output "${STAGED_PROXY_DIR}/Caddyfile"

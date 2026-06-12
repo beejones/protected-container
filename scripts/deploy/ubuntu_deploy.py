@@ -1194,7 +1194,9 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     proxy_script = repo_root / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh"
     if proxy_script.exists():
         try:
-            subprocess.run(["bash", str(proxy_script)], check=True)
+            proxy_env = os.environ.copy()
+            proxy_env["PYTHON_BIN"] = sys.executable
+            subprocess.run(["bash", str(proxy_script)], check=True, env=proxy_env)
         except subprocess.CalledProcessError as exc:
             detail = _subprocess_error_text(exc)
             message = "Failed to refresh central proxy via ubuntu_deploy_proxy.sh"

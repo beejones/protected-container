@@ -170,6 +170,8 @@ upstream_engine.main(argv_list, repo_root_override=repo_root)
 
 This ensures upstream resolves `.env`, `.env.deploy`, and `docker/docker-compose.yml` from the right place.
 
+For Ubuntu upstream container and wrapper guidance, follow [docs/deploy/HOOKS.md](docs/deploy/HOOKS.md).
+
 If you also use the upstream GitHub Actions helpers, wrap them the same way (e.g. `gh_sync_actions_env.py`, `gh_nuke_secrets.py`).
 
 #### 3) Add a hooks module for customization

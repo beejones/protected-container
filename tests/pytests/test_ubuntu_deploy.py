@@ -1,4 +1,5 @@
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -487,6 +488,14 @@ def test_proxy_deploy_script_preserves_existing_shared_routes_before_sync():
     assert script_text.index("preserve_caddy_routes.py") < script_text.index("docker compose up")
 
 
+def test_proxy_deploy_script_uses_injected_python_without_toolkit_venv():
+    repo_root = Path(__file__).resolve().parents[2]
+    script_text = (repo_root / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh").read_text(encoding="utf-8")
+
+    assert "source .venv/bin/activate" not in script_text
+    assert '"${PYTHON_BIN:-python3}" scripts/deploy/preserve_caddy_routes.py' in script_text
+
+
 def test_main_refreshes_central_proxy_even_when_container_exists(tmp_path, monkeypatch):
     (tmp_path / "docker").mkdir()
     (tmp_path / "docker" / "docker-compose.yml").write_text("services: {}\n")
@@ -539,9 +548,12 @@ def test_main_refreshes_central_proxy_even_when_container_exists(tmp_path, monke
         stderr = ""
 
     subprocess_calls: list[list[str]] = []
+    proxy_python_bins: list[str] = []
 
     def fake_run(cmd, *args, **kwargs):
         subprocess_calls.append(cmd)
+        if cmd == ["bash", str(proxy_script)]:
+            proxy_python_bins.append(kwargs["env"]["PYTHON_BIN"])
         return DummyResult()
 
     def fake_render_compose_stack_content(*, repo_root, compose_files):
@@ -561,6 +573,7 @@ def test_main_refreshes_central_proxy_even_when_container_exists(tmp_path, monke
     main(["--prod", "--skip-build-push"], repo_root_override=tmp_path)
 
     assert ["bash", str(proxy_script)] in subprocess_calls
+    assert proxy_python_bins == [sys.executable]
 
 
 def test_extract_ssh_hostname_with_and_without_user():

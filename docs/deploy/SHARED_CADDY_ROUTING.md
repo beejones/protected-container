@@ -91,6 +91,8 @@ source .venv/bin/activate
 python scripts/deploy/ubuntu_deploy.py
 ```
 
+For downstream repos that vendor this toolkit as a submodule, follow the upstream container and wrapper contract in [HOOKS.md](HOOKS.md).
+
 The deploy script automatically:
 
 1. Syncs app compose and docker assets while excluding `docker/proxy/Caddyfile`, because the central proxy Caddyfile is shared infrastructure.

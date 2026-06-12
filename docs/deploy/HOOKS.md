@@ -51,6 +51,8 @@ and reads the same environment variables:
 
 Hooks for Ubuntu deployments should customize the application stack, not the shared platform control plane. The deploy script owns the central Caddy proxy, the external `caddy` Docker network, and the `portainer` admin container. Portainer is expected to be reachable through Caddy at `https://portainer.<base-domain>` on HTTPS port `443`; hooks should not assume direct host access to Portainer on `9000` or `9443`.
 
+Downstream repos that vendor this toolkit as a submodule should run their repo-local deploy wrapper from the downstream repo's virtual environment. The wrapper should call the upstream entrypoint with `repo_root_override` pointing at the downstream repo root. Helper scripts that need Python receive the active Python executable from the deploy engine, so downstream repos should not create or depend on a separate `.venv` inside the toolkit submodule.
+
 For web-facing upstream containers, hook customizations must preserve the shared ingress contract:
 
 - Attach the web service to the external `caddy` network.
