@@ -44,6 +44,86 @@ cleanup_preserve_tmp() {
 }
 trap cleanup_preserve_tmp EXIT
 
+preserve_caddy_routes() {
+  local existing_caddyfile="$1"
+  local incoming_caddyfile="$2"
+  local output_caddyfile="$3"
+
+  if [ -f scripts/deploy/preserve_caddy_routes.py ]; then
+    "${PYTHON_BIN:-python3}" scripts/deploy/preserve_caddy_routes.py \
+      --existing "${existing_caddyfile}" \
+      --incoming "${incoming_caddyfile}" \
+      --output "${output_caddyfile}"
+    return
+  fi
+
+  "${PYTHON_BIN:-python3}" - "${existing_caddyfile}" "${incoming_caddyfile}" "${output_caddyfile}" <<'PY'
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+
+SITE_HEADER_RE = re.compile(r"^(?!\s*#)\s*(?P<label>[^\s{]+)\s*\{\s*$")
+
+
+def find_site_blocks(caddyfile_text: str) -> list[tuple[str, str]]:
+    lines = caddyfile_text.splitlines(keepends=True)
+    blocks: list[tuple[str, str]] = []
+    line_index = 0
+
+    while line_index < len(lines):
+        line = lines[line_index]
+        stripped_line = line.strip()
+        match = SITE_HEADER_RE.match(line.rstrip("\r\n"))
+        if match is None or stripped_line.startswith(("{", ":")):
+            line_index += 1
+            continue
+
+        start_index = line_index
+        depth = 1
+        line_index += 1
+        while line_index < len(lines) and depth > 0:
+            current_line = lines[line_index].strip()
+            if current_line.endswith("{") and not current_line.startswith("#"):
+                depth += 1
+            if current_line == "}":
+                depth -= 1
+            line_index += 1
+
+        blocks.append((match.group("label"), "".join(lines[start_index:line_index])))
+
+    return blocks
+
+
+def preserve_shared_routes(existing_text: str, incoming_text: str) -> str:
+    incoming_labels = {label for label, _block_text in find_site_blocks(incoming_text)}
+    preserved_blocks = [
+        block_text
+        for label, block_text in find_site_blocks(existing_text)
+        if label not in incoming_labels
+    ]
+    if not preserved_blocks:
+        return incoming_text
+
+    incoming = incoming_text.rstrip() + "\n"
+    preserved_text = "\n".join(block_text.strip() for block_text in preserved_blocks)
+    return f"{incoming}\n# -------------------------\n# Preserved Shared Routes\n# -------------------------\n{preserved_text}\n"
+
+
+existing_path = Path(sys.argv[1])
+incoming_path = Path(sys.argv[2])
+output_path = Path(sys.argv[3])
+existing_text = existing_path.read_text(encoding="utf-8") if existing_path.exists() else ""
+incoming_text = incoming_path.read_text(encoding="utf-8")
+output_path.write_text(
+    preserve_shared_routes(existing_text=existing_text, incoming_text=incoming_text),
+    encoding="utf-8",
+)
+PY
+}
+
 REMOTE_CADDYFILE="${PRESERVE_TMP_DIR}/Caddyfile.remote"
 STAGED_PROXY_DIR="${PRESERVE_TMP_DIR}/proxy"
 if ssh "${UBUNTU_SSH_HOST}" "test -f ${PROXY_DIR}/Caddyfile"; then
@@ -54,10 +134,7 @@ else
 fi
 
 rsync -a docker/proxy/ "${STAGED_PROXY_DIR}/"
-"${PYTHON_BIN:-python3}" scripts/deploy/preserve_caddy_routes.py \
-  --existing "${REMOTE_CADDYFILE}" \
-  --incoming docker/proxy/Caddyfile \
-  --output "${STAGED_PROXY_DIR}/Caddyfile"
+preserve_caddy_routes "${REMOTE_CADDYFILE}" docker/proxy/Caddyfile "${STAGED_PROXY_DIR}/Caddyfile"
 rsync -avz "${STAGED_PROXY_DIR}/" "${UBUNTU_SSH_HOST}:${PROXY_DIR}/"
 
 echo "[proxy-deploy] 🌐 Ensuring external 'caddy' network exists..."

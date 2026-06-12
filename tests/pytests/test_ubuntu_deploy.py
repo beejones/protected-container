@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -494,6 +495,99 @@ def test_proxy_deploy_script_uses_injected_python_without_toolkit_venv():
 
     assert "source .venv/bin/activate" not in script_text
     assert '"${PYTHON_BIN:-python3}" scripts/deploy/preserve_caddy_routes.py' in script_text
+
+
+def test_proxy_deploy_script_preserves_routes_without_helper_file(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    temp_repo = tmp_path / "upstream-copy"
+    proxy_dir = temp_repo / "docker" / "proxy"
+    script_dir = temp_repo / "scripts" / "deploy"
+    fake_bin = tmp_path / "bin"
+    synced_proxy_dir = tmp_path / "synced-proxy"
+    remote_caddyfile = tmp_path / "remote-Caddyfile"
+
+    proxy_dir.mkdir(parents=True)
+    script_dir.mkdir(parents=True)
+    fake_bin.mkdir()
+    synced_proxy_dir.mkdir()
+    (temp_repo / ".env").write_text("ACME_EMAIL=ops@example.com\n", encoding="utf-8")
+    (temp_repo / ".env.deploy").write_text(
+        "\n".join(
+            [
+                "UBUNTU_SSH_HOST=fake-host",
+                "UBUNTU_REMOTE_DIR=/remote/protected-container",
+                "PUBLIC_DOMAIN=protected-container.example.com",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (proxy_dir / "Caddyfile").write_text(
+        """
+protected-container.example.com {
+    reverse_proxy protected-container:3000
+}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    remote_caddyfile.write_text(
+        """
+protected-container.example.com {
+    reverse_proxy protected-container:3000
+}
+
+hermes.example.com {
+    reverse_proxy hermes-agent:8080
+}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    (script_dir / "ubuntu_deploy_proxy.sh").write_text(
+        (repo_root / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    (fake_bin / "ssh").write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+command_text="$*"
+case "$command_text" in
+  *"test -f /remote/protected-container/docker/proxy/Caddyfile"*) exit 0 ;;
+  *"cat /remote/protected-container/docker/proxy/Caddyfile"*) cat {remote_caddyfile} ;;
+  *) exit 0 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    (fake_bin / "rsync").write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+args=("$@")
+src="${{args[-2]}}"
+dest="${{args[-1]}}"
+if [[ "$dest" == fake-host:* ]]; then
+  mkdir -p {synced_proxy_dir}
+  cp -a "${{src}}"/. {synced_proxy_dir}/
+else
+  mkdir -p "$dest"
+  cp -a "${{src}}"/. "$dest"/
+fi
+""",
+        encoding="utf-8",
+    )
+    (fake_bin / "ssh").chmod(0o755)
+    (fake_bin / "rsync").chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["PYTHON_BIN"] = sys.executable
+    env["TMPDIR"] = str(tmp_path / "tmp")
+    subprocess.run(["bash", str(script_dir / "ubuntu_deploy_proxy.sh")], check=True, env=env)
+
+    merged_caddyfile = (synced_proxy_dir / "Caddyfile").read_text(encoding="utf-8")
+    assert "protected-container.example.com" in merged_caddyfile
+    assert "hermes.example.com" in merged_caddyfile
+    assert "reverse_proxy hermes-agent:8080" in merged_caddyfile
 
 
 def test_main_refreshes_central_proxy_even_when_container_exists(tmp_path, monkeypatch):
