@@ -36,7 +36,7 @@ Change `out/deploy/version_log.csv` from `timestamp,git_ref,local_branch,version
 - [x] Phase 0: Cleanup and documentation audit
 - [x] Phase 1: Implement header-aware migration and new writer order
 - [x] Phase 2: Update tests and docs for the new CSV contract
-- [ ] Phase 3: Validate, test migration, push, update the plan, and archive if complete
+- [x] Phase 3: Validate, test migration, push, update the plan, and archive if complete
 
 ## Phase 0 - Cleanup And Documentation Audit
 
@@ -118,19 +118,19 @@ Follow `.github/skills/code-cleanup/SKILL.md` for `scripts/deploy/deploy_log.py`
 
 - [x] Run focused pytest for deploy log behavior.
 - [x] Run typed-code-generation grep checks against changed Python files.
-- [ ] Test migration from the old local CSV layout to the new layout after the fix.
+- [x] Test migration from the old local CSV layout to the new layout after the fix.
 - [x] Run `git diff --check`.
-- [ ] Commit and push the branch after validation passes.
-- [ ] Mark completed tasks and archive this plan if complete.
+- [x] Commit and push the branch after validation passes.
+- [x] Mark completed tasks and archive this plan if complete.
 
 ### Exit Criteria
 
 - [x] Focused tests pass.
-- [ ] Migration test proves an old-layout file rewrites to the new header and preserves existing values.
-- [ ] Branch is pushed with the implementation and docs commits.
+- [x] Migration test proves an old-layout file rewrites to the new header and preserves existing values.
+- [x] Branch is pushed with the implementation and docs commits.
 - [x] Typing guardrail search has no new violations.
 - [x] Diff whitespace checks pass.
-- [ ] Plan is archived with completed checkboxes or left active with explicit remaining work.
+- [x] Plan is archived with completed checkboxes or left active with explicit remaining work.
 
 ## Risks And Mitigations
 
