@@ -21,7 +21,7 @@ Change `out/deploy/version_log.csv` from `timestamp,git_ref,local_branch,version
 ## Current Context
 
 - `scripts/deploy/deploy_log.py` already stores newest rows directly below the CSV header.
-- The module currently normalizes the older eight-column header and the current nine-column header in memory, but it writes the current nine-column header back out.
+- The module normalized the older eight-column header and the previous nine-column header in memory, but wrote the previous nine-column header back out before this change.
 - `docs/deploy/STAGING.md` documents the version-log columns and rollback workflow.
 - `docs/deploy/HOOKS.md` documents `DeployLogSettings.csv_path` and versioning behavior for downstream wrappers.
 
@@ -33,10 +33,10 @@ Change `out/deploy/version_log.csv` from `timestamp,git_ref,local_branch,version
 
 ## Task Overview
 
-- [ ] Phase 0: Cleanup and documentation audit
-- [ ] Phase 1: Implement header-aware migration and new writer order
-- [ ] Phase 2: Update tests and docs for the new CSV contract
-- [ ] Phase 3: Validate, update the plan, and archive if complete
+- [x] Phase 0: Cleanup and documentation audit
+- [x] Phase 1: Implement header-aware migration and new writer order
+- [x] Phase 2: Update tests and docs for the new CSV contract
+- [ ] Phase 3: Validate, test migration, push, update the plan, and archive if complete
 
 ## Phase 0 - Cleanup And Documentation Audit
 
@@ -44,35 +44,35 @@ Follow `.github/skills/code-cleanup/SKILL.md` for `scripts/deploy/deploy_log.py`
 
 ### Tasks
 
-- [ ] Audit `deploy_log.py` for duplicated row normalization and stale column-index assumptions.
-- [ ] Audit `test_deploy_log.py` for brittle positional assertions that should instead track the new canonical order.
-- [ ] Review `docs/deploy/STAGING.md` and `docs/deploy/HOOKS.md` for stale version-log contract text.
-- [ ] Confirm focused validation target before implementation.
+- [x] Audit `deploy_log.py` for duplicated row normalization and stale column-index assumptions.
+- [x] Audit `test_deploy_log.py` for brittle positional assertions that should instead track the new canonical order.
+- [x] Review `docs/deploy/STAGING.md` and `docs/deploy/HOOKS.md` for stale version-log contract text.
+- [x] Confirm focused validation target before implementation.
 
 ### Exit Criteria
 
-- [ ] Cleanup findings are resolved or recorded as follow-ups.
-- [ ] The affected docs are known and scheduled for update.
-- [ ] Focused validation target is `source .venv/bin/activate && python -m pytest tests/pytests/test_deploy_log.py -v`.
+- [x] Cleanup findings are resolved or recorded as follow-ups.
+- [x] The affected docs are known and scheduled for update.
+- [x] Focused validation target is `source .venv/bin/activate && python -m pytest tests/pytests/test_deploy_log.py -v`.
 
 ## Phase 1 - Migration And Writer Order
 
 ### Tasks
 
-- [ ] Update `CSV_COLUMNS` to `timestamp,git_ref,version,status,target,local_branch,stack_name,domain,image`.
-- [ ] Preserve constants for supported legacy layouts so old files can be detected by header.
-- [ ] Convert old nine-column and older eight-column rows into the new canonical row order.
-- [ ] Ensure append logic writes the new header and migrates existing rows on the next write.
+- [x] Update `CSV_COLUMNS` to `timestamp,git_ref,version,status,target,local_branch,stack_name,domain,image`.
+- [x] Preserve constants for supported legacy layouts so old files can be detected by header.
+- [x] Convert old nine-column and older eight-column rows into the new canonical row order.
+- [x] Ensure append logic writes the new header and migrates existing rows on the next write.
 
 ### Acceptance Criteria
 
-- [ ] A log with the old nine-column header rewrites into the new header without losing branch, status, target, stack, domain, or image values.
-- [ ] A log with the older eight-column header still backfills `local_branch` as `main` and rewrites into the new header.
-- [ ] New deploy and merge rows write `version` and `status` before `target`.
+- [x] A log with the old nine-column header rewrites into the new header without losing branch, status, target, stack, domain, or image values.
+- [x] A log with the older eight-column header still backfills `local_branch` as `main` and rewrites into the new header.
+- [x] New deploy and merge rows write `version` and `status` before `target`.
 
 ### Verification
 
-- [ ] `source .venv/bin/activate && python -m pytest tests/pytests/test_deploy_log.py -v`
+- [x] `source .venv/bin/activate && python -m pytest tests/pytests/test_deploy_log.py -v`
 
 ### Files Likely Touched
 
@@ -81,26 +81,26 @@ Follow `.github/skills/code-cleanup/SKILL.md` for `scripts/deploy/deploy_log.py`
 
 ### Exit Criteria
 
-- [ ] Supported old schemas migrate automatically on append.
-- [ ] Version bump and same-git-ref reuse behavior is unchanged.
+- [x] Supported old schemas migrate automatically on append.
+- [x] Version bump and same-git-ref reuse behavior is unchanged.
 
 ## Phase 2 - Documentation
 
 ### Tasks
 
-- [ ] Update `docs/deploy/STAGING.md` with the new column order and migration behavior.
-- [ ] Update `docs/deploy/HOOKS.md` if hook guidance needs to mention automatic migration for custom CSV paths.
-- [ ] Update `CHANGELOG.md` only if this branch is being prepared as a versioned release entry.
+- [x] Update `docs/deploy/STAGING.md` with the new column order and migration behavior.
+- [x] Update `docs/deploy/HOOKS.md` if hook guidance needs to mention automatic migration for custom CSV paths.
+- [x] Confirm `CHANGELOG.md` is not part of this change because the branch is not being prepared as a versioned release entry.
 
 ### Acceptance Criteria
 
-- [ ] Docs show the new header order.
-- [ ] Docs state that supported old headers are migrated automatically on the next deploy-log write.
-- [ ] Docs do not imply changelog entries are generated by deploy logging.
+- [x] Docs show the new header order.
+- [x] Docs state that supported old headers are migrated automatically on the next deploy-log write.
+- [x] Docs do not imply changelog entries are generated by deploy logging.
 
 ### Verification
 
-- [ ] Manual docs review against `deploy_log.py` constants and tests.
+- [x] Manual docs review against `deploy_log.py` constants and tests.
 
 ### Files Likely Touched
 
@@ -110,22 +110,26 @@ Follow `.github/skills/code-cleanup/SKILL.md` for `scripts/deploy/deploy_log.py`
 
 ### Exit Criteria
 
-- [ ] The documented contract matches the code and tests.
+- [x] The documented contract matches the code and tests.
 
 ## Phase 3 - Validation And Handoff
 
 ### Tasks
 
-- [ ] Run focused pytest for deploy log behavior.
-- [ ] Run typed-code-generation grep checks against changed Python files.
-- [ ] Run `git diff --check`.
+- [x] Run focused pytest for deploy log behavior.
+- [x] Run typed-code-generation grep checks against changed Python files.
+- [ ] Test migration from the old local CSV layout to the new layout after the fix.
+- [x] Run `git diff --check`.
+- [ ] Commit and push the branch after validation passes.
 - [ ] Mark completed tasks and archive this plan if complete.
 
 ### Exit Criteria
 
-- [ ] Focused tests pass.
-- [ ] Typing guardrail search has no new violations.
-- [ ] Diff whitespace checks pass.
+- [x] Focused tests pass.
+- [ ] Migration test proves an old-layout file rewrites to the new header and preserves existing values.
+- [ ] Branch is pushed with the implementation and docs commits.
+- [x] Typing guardrail search has no new violations.
+- [x] Diff whitespace checks pass.
 - [ ] Plan is archived with completed checkboxes or left active with explicit remaining work.
 
 ## Risks And Mitigations

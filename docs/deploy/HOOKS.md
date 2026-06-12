@@ -173,6 +173,8 @@ The `settings` object is mutable:
 - `settings.csv_path` (`Path`): CSV path to write. Relative paths are resolved from `ctx.repo_root`.
 - `settings.versioning_enabled` (`bool`, default `True`): when `False`, deploy rows still record the current `APP_VERSION`. When enabled, repeated records for the same git ref reuse the logged version; successful merge or deploy records for a new git ref bump `APP_VERSION` from the newest successful version-log row unless `.env` is already ahead.
 
+Custom CSV paths use the same automatic schema migration as the default log. If the configured file has a supported older header, the next deploy-log write rewrites it to `timestamp,git_ref,version,status,target,local_branch,stack_name,domain,image` before preserving existing rows under the new record.
+
 ### `on_error(ctx, exc)`
 - **Summary**: If an exception occurs during the deployment lifecycle.
 - **Note**: This catch includes deployment runtime exceptions but excludes `SystemExit` (e.g. from argparse or direct validation skips).

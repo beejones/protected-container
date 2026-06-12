@@ -62,7 +62,7 @@
 - [x] Add `APP_VERSION` to `env_schema.py` RUNTIME_SCHEMA (optional, default `0.0.0`)
 - [x] Create `scripts/deploy/deploy_log.py` with:
   - `append_deploy_record(...)` / `append_deploy_record_with_settings(...)` → writes newest row below the header
-  - CSV columns: `timestamp,git_ref,local_branch,version,target,stack_name,domain,image,status`
+  - CSV columns: `timestamp,git_ref,version,status,target,local_branch,stack_name,domain,image`
   - Auto-creates `out/deploy/` directory if missing
   - `git_ref` = full 40-char SHA from `git rev-parse HEAD`
   - `local_branch` = checked-out deploy branch, with legacy rows backfilled as `main`
