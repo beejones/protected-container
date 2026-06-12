@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.11] - 2026-06-12
+
+### Git
+
+- Last git ref: [`2d42279`](https://github.com/beejones/protected-container/commit/2d422791500dff6d2b4b0d30b02b46aed40c7d9d)
+
+### New Capabilities
+
+- Added remote candidate validation for shared Caddy proxy refreshes before replacing the live proxy files or recreating `central-proxy`.
+
+### Fixed Bugs
+
+- Fixed a serious proxy refresh regression where downstream deploys could recreate `central-proxy` with an invalid Basic Auth hash parsed through Docker Compose `env_file`, causing Caddy to crash-loop.
+- Fixed proxy refresh environment handling so shell-sourced Basic Auth values are passed explicitly into Caddy validation and the live Compose recreate.
+
+### Touched Models
+
+- Shared Caddy proxy refresh safety contract.
+- Ubuntu deploy proxy environment contract.
+
 ## [0.2.10] - 2026-06-12
 
 ### Git

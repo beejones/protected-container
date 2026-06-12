@@ -14,8 +14,8 @@
 - [x] Phase 1 bug proof: add tests that proxy Compose receives Basic Auth through explicit environment values and validates before `up`.
 - [x] Phase 2 implementation: update proxy Compose/script so sourced Basic Auth values override `env_file` parsing.
 - [x] Phase 2 implementation: prevalidate the staged proxy with `docker run --rm ... caddy validate` before `up -d --force-recreate`.
-- [ ] Phase 3 validation: run focused tests, shell syntax, deploy, and live route checks.
-- [ ] Phase 4 docs/changelog: update `CHANGELOG.md` for the completed regression fix.
+- [x] Phase 3 validation: run focused tests, shell syntax, deploy, and live route checks.
+- [x] Phase 4 docs/changelog: update `CHANGELOG.md` for the completed regression fix.
 
 ## Root-Cause Hypothesis
 
@@ -31,3 +31,6 @@ No Hermes container changes are needed. The toolkit should protect the shared pr
 - Regression proof: `source .venv/bin/activate && python -m pytest tests/pytests/test_ubuntu_deploy.py::test_proxy_compose_accepts_basic_auth_environment_overrides tests/pytests/test_ubuntu_deploy.py::test_proxy_deploy_script_prevalidates_before_recreating_caddy -x -v` failed before the fix because proxy Compose did not explicitly accept sourced Basic Auth values.
 - Focused validation passed after the fix: `source .venv/bin/activate && python -m pytest tests/pytests/test_ubuntu_deploy.py -v` reported 57 passed.
 - Shell validation passed: `bash -n scripts/deploy/ubuntu_deploy_proxy.sh`.
+- Production deploy validation passed for git ref `2d422791500dff6d2b4b0d30b02b46aed40c7d9d` as version `0.2.11`; proxy candidate validation ran before `central-proxy` recreate and live Caddy stayed up.
+- Live route validation passed after deploy: `stock-dashboard.zenia.eu` and `hermes.zenia.eu` returned `HTTP/2 401`; `portainer.zenia.eu` returned `HTTP/2 200`.
+- Remote env shape check passed without printing secrets: `BASIC_AUTH_HASH` length was 60 and first character was `$`.
