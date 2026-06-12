@@ -13,7 +13,7 @@
 - [x] Phase 1 bug proof: assert proxy refresh syncs a generated proxy `.env` with quoted Basic Auth hash values.
 - [x] Phase 2 implementation: generate `docker/proxy/.env` in the staged proxy directory before candidate validation and live sync.
 - [x] Phase 3 validation: run focused Ubuntu deploy tests and shell syntax checks.
-- [ ] Phase 4 docs/changelog: update release notes and archive this plan.
+- [x] Phase 4 docs/changelog: update release notes and archive this plan.
 
 ## Root-Cause Hypothesis
 
@@ -28,3 +28,7 @@ Hermes should update/pin the toolkit after this fix and rerun the same deploy. N
 - Regression proof: `source .venv/bin/activate && python -m pytest tests/pytests/test_ubuntu_deploy.py::test_proxy_deploy_script_preserves_routes_without_helper_file -x -v` failed before the fix because the staged/synced proxy directory did not include `.env`.
 - Focused validation passed after the fix: `source .venv/bin/activate && python -m pytest tests/pytests/test_ubuntu_deploy.py -v` reported 57 passed.
 - Shell validation passed: `bash -n scripts/deploy/ubuntu_deploy_proxy.sh`.
+- Production deploy validation passed for git ref `c3bc0c37dbb360363ae36b001d2bc0b89c06ce63` as version `0.2.12`; proxy refresh synced `.env` before recreating `central-proxy`.
+- Remote compatibility validation passed: `docker compose config` succeeds from `/home/ronny/containers/protected-container/docker/proxy` without exported env.
+- Live route validation passed after deploy: `stock-dashboard.zenia.eu` and `hermes.zenia.eu` returned `HTTP/2 401`; `portainer.zenia.eu` returned `HTTP/2 200`.
+- Effective container env check passed without printing secrets: `BASIC_AUTH_HASH` length was 60 and first character was `$`.

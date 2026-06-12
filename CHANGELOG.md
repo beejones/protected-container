@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.12] - 2026-06-12
+
+### Git
+
+- Last git ref: [`c3bc0c3`](https://github.com/beejones/protected-container/commit/c3bc0c37dbb360363ae36b001d2bc0b89c06ce63)
+
+### New Capabilities
+
+- Added a generated proxy-local `.env` during shared Caddy proxy refreshes so downstream hooks can rerun proxy Compose commands without manually exporting Caddy runtime variables.
+
+### Fixed Bugs
+
+- Fixed Hermes `--swap` post-deploy failures where `docker compose up -d caddy` in the shared proxy directory could not interpolate required `ACME_EMAIL` and Basic Auth values after the proxy Compose safety changes.
+
+### Touched Models
+
+- Shared Caddy proxy refresh environment contract.
+- Downstream hook proxy Compose compatibility contract.
+
 ## [0.2.11] - 2026-06-12
 
 ### Git
