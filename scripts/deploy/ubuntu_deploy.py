@@ -1397,6 +1397,8 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             is_registered = caddy_register.is_domain_registered(
                 ssh_host=resolved_host,
                 domain=resolved_public_domain,
+                service=service_name,
+                port=resolved_web_port,
                 caddyfile_path=caddyfile_path,
             )
             if is_registered:

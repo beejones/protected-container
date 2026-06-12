@@ -228,6 +228,57 @@ def test_ensure_caddy_registration_skips_when_public_domain_placeholder_matches(
     assert any("docker inspect" in cmd for cmd in calls)
 
 
+def test_ensure_caddy_registration_repairs_public_domain_placeholder_with_stale_upstream(monkeypatch) -> None:
+    state = {
+        "caddyfile": """
+{$PUBLIC_DOMAIN} {
+    basic_auth /* {
+        {$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+    }
+    reverse_proxy protected-container:8080
+}
+"""
+    }
+
+    def fake_ssh_run(host: str, cmd: str, **_: str | bool | None) -> subprocess.CompletedProcess:
+        if cmd.startswith("cat "):
+            return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout=state["caddyfile"], stderr="")
+        if "docker inspect" in cmd:
+            return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout="example.com\n", stderr="")
+        return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout="", stderr="")
+
+    def fake_subprocess_run(
+        full: list[str],
+        input: str | None = None,
+        text: bool = True,
+        capture_output: bool = True,
+        check: bool = True,
+    ) -> subprocess.CompletedProcess:
+        assert text is True
+        assert capture_output is True
+        assert check is True
+        if input is not None:
+            state["caddyfile"] = input
+        return subprocess.CompletedProcess(args=full, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(caddy_register, "_ssh_run", fake_ssh_run)
+    monkeypatch.setattr(caddy_register.subprocess, "run", fake_subprocess_run)
+
+    out = caddy_register.ensure_caddy_registration(
+        ssh_host="user@host",
+        domain="example.com",
+        service="stock-dashboard",
+        port="3000",
+        caddyfile_path="/opt/proxy/Caddyfile",
+    )
+
+    assert out is True
+    assert "{$PUBLIC_DOMAIN} {" in state["caddyfile"]
+    assert "basic_auth /* {" in state["caddyfile"]
+    assert "reverse_proxy stock-dashboard:3000" in state["caddyfile"]
+    assert "reverse_proxy protected-container:8080" not in state["caddyfile"]
+
+
 def test_is_domain_registered_returns_false_for_unprotected_site_block(monkeypatch) -> None:
     caddyfile_text = """
 example.com {
@@ -245,6 +296,38 @@ example.com {
     out = caddy_register.is_domain_registered(
         ssh_host="user@host",
         domain="example.com",
+        service="my-service",
+        port="8080",
+        caddyfile_path="/opt/proxy/Caddyfile",
+    )
+
+    assert out is False
+
+
+def test_is_domain_registered_returns_false_for_public_domain_placeholder_with_stale_upstream(monkeypatch) -> None:
+    caddyfile_text = """
+{$PUBLIC_DOMAIN} {
+    basic_auth /* {
+        {$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+    }
+    reverse_proxy protected-container:8080
+}
+"""
+
+    def fake_ssh_run(host: str, cmd: str, **_: str | bool | None) -> subprocess.CompletedProcess:
+        if cmd.startswith("cat "):
+            return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout=caddyfile_text, stderr="")
+        if "docker inspect" in cmd:
+            return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout="example.com\n", stderr="")
+        return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(caddy_register, "_ssh_run", fake_ssh_run)
+
+    out = caddy_register.is_domain_registered(
+        ssh_host="user@host",
+        domain="example.com",
+        service="stock-dashboard",
+        port="3000",
         caddyfile_path="/opt/proxy/Caddyfile",
     )
 
