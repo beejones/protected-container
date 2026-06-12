@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.10] - 2026-06-12
+
+### Git
+
+- Last git ref: [`2bf5a27`](https://github.com/beejones/protected-container/commit/2bf5a27277f879f4a9975feb9ee49f1772aa89b9)
+
+### New Capabilities
+
+- Documented the Ubuntu upstream container and downstream wrapper contract in the hooks guide, with routing and README docs linking to that canonical guidance.
+
+### Fixed Bugs
+
+- Fixed downstream Ubuntu deploys that vendor this toolkit as a submodule or temporary upstream checkout by passing the active deploy Python executable into the proxy refresh helper instead of requiring a toolkit-local `.venv`.
+
+### Touched Models
+
+- Ubuntu deploy helper execution contract.
+- Upstream container hook guidance contract.
+
 ## [0.2.9] - 2026-06-12
 
 ### Git
