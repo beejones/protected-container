@@ -55,6 +55,8 @@ Downstream repos that vendor this toolkit as a submodule should run their repo-l
 
 Downstream containers do not need to package toolkit proxy helper files. The shared proxy refresh preserves existing Caddy routes from the toolkit side, including temporary upstream checkouts that include the proxy shell script and template but omit standalone helper modules.
 
+Hooks that patch the shared proxy after deployment may rerun `docker compose up -d caddy` in the remote proxy directory. The toolkit refresh writes a proxy-local `.env` for those follow-up Compose commands, so hooks do not need to re-export Caddy Basic Auth or ACME variables.
+
 For web-facing upstream containers, hook customizations must preserve the shared ingress contract:
 
 - Attach the web service to the external `caddy` network.

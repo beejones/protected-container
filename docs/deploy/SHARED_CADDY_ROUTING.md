@@ -97,7 +97,7 @@ The deploy script automatically:
 
 1. Syncs app compose and docker assets while excluding `docker/proxy/Caddyfile`, because the central proxy Caddyfile is shared infrastructure.
 2. Reads the existing remote proxy Caddyfile and preserves site blocks that are not present in the repo-owned proxy template.
-3. Stages the merged proxy files on the remote host and validates the candidate Caddyfile with the same Basic Auth environment values that will be passed to the live proxy.
+3. Stages the merged proxy files on the remote host, writes a proxy-local `.env` for follow-up Compose commands, and validates the candidate Caddyfile with the same Basic Auth environment values that will be passed to the live proxy.
 4. Syncs the validated proxy files to the live proxy directory.
 5. Recreates `central-proxy` so Caddy mounts the latest validated Caddyfile.
 6. Reads the proxy Caddyfile on the remote host via SSH.

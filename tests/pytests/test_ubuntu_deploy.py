@@ -614,9 +614,14 @@ fi
     subprocess.run(["bash", str(script_dir / "ubuntu_deploy_proxy.sh")], check=True, env=env)
 
     merged_caddyfile = (synced_proxy_dir / "Caddyfile").read_text(encoding="utf-8")
+    proxy_dotenv = (synced_proxy_dir / ".env").read_text(encoding="utf-8")
     assert "protected-container.example.com" in merged_caddyfile
     assert "hermes.example.com" in merged_caddyfile
     assert "reverse_proxy hermes-agent:8080" in merged_caddyfile
+    assert "ACME_EMAIL='ops@example.com'" in proxy_dotenv
+    assert "PUBLIC_DOMAIN='protected-container.example.com'" in proxy_dotenv
+    assert "BASIC_AUTH_USER='admin'" in proxy_dotenv
+    assert "BASIC_AUTH_HASH='$2a$14$abcdefghijklmnopqrstuvabcdefghijklmnopqrstuvabcdefghijkl'" in proxy_dotenv
 
 
 def test_main_refreshes_central_proxy_even_when_container_exists(tmp_path, monkeypatch):

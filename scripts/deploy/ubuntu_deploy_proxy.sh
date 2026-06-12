@@ -42,6 +42,28 @@ shell_quote() {
   printf "%q" "$1"
 }
 
+dotenv_quote() {
+  local key="$1"
+  local value="$2"
+  case "${value}" in
+    *$'\n'*|*"'"*)
+      echo "[proxy-deploy] ❌ Error: ${key} contains a newline or single quote and cannot be written to proxy .env" >&2
+      exit 1
+      ;;
+  esac
+  printf "%s='%s'\n" "${key}" "${value}"
+}
+
+write_proxy_dotenv() {
+  local output_path="$1"
+  {
+    dotenv_quote "ACME_EMAIL" "${ACME_EMAIL}"
+    dotenv_quote "PUBLIC_DOMAIN" "${PUBLIC_DOMAIN}"
+    dotenv_quote "BASIC_AUTH_USER" "${BASIC_AUTH_USER}"
+    dotenv_quote "BASIC_AUTH_HASH" "${BASIC_AUTH_HASH}"
+  } > "${output_path}"
+}
+
 ACME_EMAIL_REMOTE="$(shell_quote "${ACME_EMAIL}")"
 PUBLIC_DOMAIN_REMOTE="$(shell_quote "${PUBLIC_DOMAIN}")"
 BASIC_AUTH_USER_REMOTE="$(shell_quote "${BASIC_AUTH_USER}")"
@@ -156,6 +178,7 @@ fi
 
 rsync -a docker/proxy/ "${STAGED_PROXY_DIR}/"
 preserve_caddy_routes "${REMOTE_CADDYFILE}" docker/proxy/Caddyfile "${STAGED_PROXY_DIR}/Caddyfile"
+write_proxy_dotenv "${STAGED_PROXY_DIR}/.env"
 
 echo "[proxy-deploy] 🧪 Validating candidate proxy configuration..."
 ssh "${UBUNTU_SSH_HOST}" "rm -rf ${REMOTE_STAGE_DIR} && mkdir -p ${REMOTE_STAGE_DIR}"
