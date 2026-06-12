@@ -58,7 +58,7 @@ Staging is the default target:
 source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py
 ```
 
-This deploys using `STAGING_*` overrides for domain, remote dir, and stack name. Containers are **created and then stopped via Portainer API**. All other settings (SSH host, compose files, hooks) are shared. New git refs deploy with the current `APP_VERSION`; repeated deploys of the same git ref reuse the logged version.
+This deploys using `STAGING_*` overrides for domain, remote dir, and stack name. Containers are **created and then stopped via Portainer API**. All other settings (SSH host, compose files, hooks) are shared. New successful git refs bump `APP_VERSION` from the newest successful version-log row unless `.env` is already ahead; repeated deploys of the same git ref reuse the logged version.
 
 ## Deploy to Production
 
@@ -68,7 +68,7 @@ Pass `--prod` to target production:
 source .venv/bin/activate && python scripts/deploy/ubuntu_deploy.py --prod
 ```
 
-This updates and starts production containers, then stops any staging containers. New git refs deploy with the current `APP_VERSION`; repeated deploys of the same git ref reuse the logged version.
+This updates and starts production containers, then stops any staging containers. New successful git refs bump `APP_VERSION` from the newest successful version-log row unless `.env` is already ahead; repeated deploys of the same git ref reuse the logged version.
 
 ## Promote Staging to Production
 
@@ -96,15 +96,17 @@ Every deploy writes a row to `out/deploy/version_log.csv`. The latest record app
 |--------|---------|
 | `timestamp` | `2026-05-18T14:30:00Z` |
 | `git_ref` | Full 40-char SHA |
-| `local_branch` | Checked-out deploy branch |
 | `version` | `1.2.3` from `APP_VERSION` |
+| `status` | `success` / `failed` |
 | `target` | `staging` / `production` / `swap` |
+| `local_branch` | Checked-out deploy branch |
 | `stack_name` | Portainer stack name |
 | `domain` | Public domain for this deploy |
 | `image` | Container image deployed |
-| `status` | `success` / `failed` |
 
-`APP_VERSION` is recorded in the `version` column for every deploy. If the current git ref already has a successful row, later staging, production, or swap records for that same git ref reuse the version already recorded for that git ref. If the git ref has no successful row yet, the deploy records the current `APP_VERSION`. Failed deploys never change `APP_VERSION`.
+`APP_VERSION` is recorded in the `version` column for every deploy. If the current git ref already has a successful row, later staging, production, or swap records for that same git ref reuse the version already recorded for that git ref. If the git ref has no successful row yet, successful deploys compare `.env` `APP_VERSION` with the newest successful version-log row: `.env` is reused when it is already ahead, otherwise the previous logged patch version is incremented and written back to `.env` before the new row is written. Failed deploys never change `APP_VERSION`.
+
+Supported older `version_log.csv` headers are migrated automatically on the next deploy-log write. The previous nine-column layout `timestamp,git_ref,local_branch,version,target,stack_name,domain,image,status` is rewritten as `timestamp,git_ref,version,status,target,local_branch,stack_name,domain,image`. The older layout without `local_branch` is still accepted and backfills `local_branch` as `main`.
 
 The merge workflow records the merged git ref first:
 
@@ -112,7 +114,7 @@ The merge workflow records the merged git ref first:
 source ../../../.venv/bin/activate && python scripts/deploy/deploy_log.py --record-merge
 ```
 
-That increments `.env` `APP_VERSION` to the target already prepared in `CHANGELOG.md`, writes a `target=merge` row for the merged git ref, and lets a direct deploy of that same git ref reuse the merge row's version.
+That writes a `target=merge` row for the merged git ref, bumps `.env` `APP_VERSION` with the same version-log rules used by deploy records, and lets a direct deploy of that same git ref reuse the merge row's version. `CHANGELOG.md` is release-note workflow state and is not generated or validated by deploy logging.
 
 **Rollback from CSV**: Find the latest `production` or `swap` + `success` row, use `git_ref` to checkout that commit, redeploy with `--prod`.
 

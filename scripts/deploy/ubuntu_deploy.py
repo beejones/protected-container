@@ -145,11 +145,18 @@ def _run(cmd: list[str], *, check: bool = True, action: str | None = None) -> No
         raise SystemExit(message)
 
 
-def build_rsync_cmd(*, sources: list[Path], host: str, remote_dir: Path) -> list[str]:
+def build_rsync_cmd(
+    *,
+    sources: list[Path],
+    host: str,
+    remote_dir: Path,
+    exclude_patterns: tuple[str, ...] = (),
+) -> list[str]:
     srcs = [str(p) for p in sources]
+    exclude_args = [arg for pattern in exclude_patterns for arg in ["--exclude", pattern]]
     # Trailing slash on remote_dir ensures rsync copies into the dir.
     dest = f"{host}:{str(remote_dir)}/"
-    return ["rsync", "-az", "--mkpath", *srcs, dest]
+    return ["rsync", "-az", "--mkpath", *exclude_args, *srcs, dest]
 
 
 def build_ssh_cmd(*, host: str, remote_command: str) -> list[str]:
@@ -1133,7 +1140,12 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     log_step("Syncing compose files and docker assets", icon="📦")
     sync_paths: list[Path] = [repo_root / cf for cf in compose_files] + [repo_root / "docker"]
     _run(
-        build_rsync_cmd(sources=sync_paths, host=resolved_host, remote_dir=remote_dir),
+        build_rsync_cmd(
+            sources=sync_paths,
+            host=resolved_host,
+            remote_dir=remote_dir,
+            exclude_patterns=("proxy/Caddyfile", "docker/proxy/Caddyfile"),
+        ),
         action="Failed to sync compose files and docker assets",
     )
 
@@ -1182,7 +1194,9 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     proxy_script = repo_root / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh"
     if proxy_script.exists():
         try:
-            subprocess.run(["bash", str(proxy_script)], check=True)
+            proxy_env = os.environ.copy()
+            proxy_env["PYTHON_BIN"] = sys.executable
+            subprocess.run(["bash", str(proxy_script)], check=True, env=proxy_env)
         except subprocess.CalledProcessError as exc:
             detail = _subprocess_error_text(exc)
             message = "Failed to refresh central proxy via ubuntu_deploy_proxy.sh"
@@ -1397,6 +1411,8 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
             is_registered = caddy_register.is_domain_registered(
                 ssh_host=resolved_host,
                 domain=resolved_public_domain,
+                service=service_name,
+                port=resolved_web_port,
                 caddyfile_path=caddyfile_path,
             )
             if is_registered:

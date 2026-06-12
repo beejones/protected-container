@@ -151,6 +151,37 @@ def _site_block_has_basic_auth(site_block: str) -> bool:
     return bool(pattern.search(site_block))
 
 
+def _site_block_has_expected_upstream(
+    site_block: str,
+    *,
+    service: str,
+    port: str,
+) -> bool:
+    """Return True when *site_block* proxies to the expected service port."""
+    expected_upstream = f"{service}:{port}"
+    pattern = re.compile(
+        r"^(?!\s*#)\s*reverse_proxy\s+"
+        + re.escape(expected_upstream)
+        + r"(?:\s|\{|$)",
+        re.MULTILINE,
+    )
+    return bool(pattern.search(site_block))
+
+
+def _site_block_matches_expected_route(
+    site_block: str,
+    *,
+    service: str,
+    port: str,
+) -> bool:
+    """Return True when *site_block* is protected and points at the app."""
+    return _site_block_has_basic_auth(site_block) and _site_block_has_expected_upstream(
+        site_block,
+        service=service,
+        port=port,
+    )
+
+
 def _write_remote_caddyfile(*, ssh_host: str, caddyfile_path: str, content: str, append: bool) -> None:
     """Write *content* to the remote Caddyfile, appending or replacing it."""
     tee_flag = "-a " if append else ""
@@ -245,14 +276,20 @@ def ensure_caddy_registration(
 
     # 2. Already registered?  ────────────────────────────────────────────
     if existing_domain_block is not None:
-        if _site_block_has_basic_auth(existing_domain_block):
+        if _site_block_matches_expected_route(
+            existing_domain_block,
+            service=service,
+            port=port,
+        ):
             logger.info("%s %s already registered", LOG_PREFIX, domain)
             return False
 
         logger.warning(
-            "%s %s has an unprotected Caddy route; rewriting it with basic_auth.",
+            "%s %s has a stale Caddy route; rewriting it with basic_auth and upstream %s:%s.",
             LOG_PREFIX,
             domain,
+            service,
+            port,
         )
         updated_caddyfile_text = caddyfile_text.replace(existing_domain_block, expected_block, 1)
 
@@ -274,9 +311,13 @@ def ensure_caddy_registration(
             raise RuntimeError(
                 f"Rewrote Caddy block for {domain} but it was not found on re-read"
             )
-        if not _site_block_has_basic_auth(updated_domain_block):
+        if not _site_block_matches_expected_route(
+            updated_domain_block,
+            service=service,
+            port=port,
+        ):
             raise RuntimeError(
-                f"Rewrote Caddy block for {domain} but it is still missing basic_auth"
+                f"Rewrote Caddy block for {domain} but it still does not match basic_auth plus upstream {service}:{port}"
             )
 
         caddyfile_text = str(result2.stdout or "")
@@ -295,16 +336,77 @@ def ensure_caddy_registration(
             caddy_container=caddy_container,
         )
         if resolved_public_domain and resolved_public_domain == domain:
-            if not _site_block_has_basic_auth(placeholder_block):
-                raise RuntimeError(
-                    f"{domain} is covered by {{$PUBLIC_DOMAIN}} but the placeholder route is missing basic_auth"
+            if _site_block_matches_expected_route(
+                placeholder_block,
+                service=service,
+                port=port,
+            ):
+                logger.info(
+                    "%s %s already covered by {$PUBLIC_DOMAIN} placeholder",
+                    LOG_PREFIX,
+                    domain,
                 )
+                return False
+
             logger.info(
-                "%s %s already covered by {$PUBLIC_DOMAIN} placeholder",
+                "%s %s is covered by a stale {$PUBLIC_DOMAIN} placeholder; rewriting it with basic_auth and upstream %s:%s.",
                 LOG_PREFIX,
                 domain,
+                service,
+                port,
             )
-            return False
+            expected_placeholder_block = _render_site_block(
+                domain="{$PUBLIC_DOMAIN}",
+                service=service,
+                port=port,
+            )
+            updated_caddyfile_text = caddyfile_text.replace(
+                placeholder_block,
+                expected_placeholder_block,
+                1,
+            )
+
+            if dry_run:
+                logger.info(
+                    "%s [dry-run] Would rewrite {$PUBLIC_DOMAIN} placeholder for %s",
+                    LOG_PREFIX,
+                    domain,
+                )
+                logger.debug(
+                    "%s [dry-run] Rewritten block:\n%s",
+                    LOG_PREFIX,
+                    expected_placeholder_block,
+                )
+                return True
+
+            _write_remote_caddyfile(
+                ssh_host=ssh_host,
+                caddyfile_path=caddyfile_path,
+                content=updated_caddyfile_text,
+                append=False,
+            )
+
+            result2 = _ssh_run(ssh_host, f"cat {shlex.quote(caddyfile_path)}")
+            updated_placeholder_block = _find_site_block(
+                str(result2.stdout or ""),
+                "{$PUBLIC_DOMAIN}",
+            )
+            if updated_placeholder_block is None:
+                raise RuntimeError(
+                    f"Rewrote {{$PUBLIC_DOMAIN}} Caddy block for {domain} but it was not found on re-read"
+                )
+            if not _site_block_matches_expected_route(
+                updated_placeholder_block,
+                service=service,
+                port=port,
+            ):
+                raise RuntimeError(
+                    f"Rewrote {{$PUBLIC_DOMAIN}} Caddy block for {domain} but it still does not match basic_auth plus upstream {service}:{port}"
+                )
+
+            _restart_and_validate_caddy(ssh_host=ssh_host, caddy_container=caddy_container)
+            logger.info("%s Registered %s -> %s:%s", LOG_PREFIX, domain, service, port)
+            return True
 
     # 3. Build the site block  ───────────────────────────────────────────
     block = expected_block
@@ -345,16 +447,22 @@ def is_domain_registered(
     *,
     ssh_host: str,
     domain: str,
+    service: str,
+    port: str | int,
     caddyfile_path: str,
     caddy_container: str = DEFAULT_CADDY_CONTAINER,
 ) -> bool:
     """Return True when *domain* is covered by the remote Caddy config.
 
     Coverage is satisfied when either:
-    - a literal site block exists for ``domain`` and includes ``basic_auth``, or
+    - a literal site block exists for ``domain`` and includes ``basic_auth``
+      plus the expected ``reverse_proxy`` upstream, or
     - a ``{$PUBLIC_DOMAIN}`` site block exists and resolves to ``domain``
-      in the running Caddy container environment and includes ``basic_auth``.
+      in the running Caddy container environment and includes ``basic_auth``
+      plus the expected ``reverse_proxy`` upstream.
     """
+    port = str(port)
+
     result = _ssh_run(ssh_host, f"cat {shlex.quote(caddyfile_path)}", check=False)
     if result.returncode != 0:
         return False
@@ -362,7 +470,11 @@ def is_domain_registered(
     caddyfile_text = str(result.stdout or "")
     domain_block = _find_site_block(caddyfile_text, domain)
     if domain_block is not None:
-        return _site_block_has_basic_auth(domain_block)
+        return _site_block_matches_expected_route(
+            domain_block,
+            service=service,
+            port=port,
+        )
 
     placeholder_block = _find_site_block(caddyfile_text, "{$PUBLIC_DOMAIN}")
     if placeholder_block is not None:
@@ -371,6 +483,10 @@ def is_domain_registered(
             caddy_container=caddy_container,
         )
         if resolved_public_domain and resolved_public_domain == domain:
-            return _site_block_has_basic_auth(placeholder_block)
+            return _site_block_matches_expected_route(
+                placeholder_block,
+                service=service,
+                port=port,
+            )
 
     return False

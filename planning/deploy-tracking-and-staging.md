@@ -4,7 +4,7 @@
 
 - **Deploy history is observable**: Every successful deploy writes a row to a CSV log so operators can trace exactly what was deployed and when. The newest row appears directly below the header.
 - **Git commit is the rollback anchor**: The CSV records the **full 40-char commit SHA** (`git rev-parse HEAD`) so you can always `git checkout <sha>` to reproduce exactly what was deployed.
-- **Version lives in `.env` as `APP_VERSION`**: Format `x.y.z` (semver). `/changelog` prepares the next main-bound changelog entry, and the post-merge version-log command can bump `.env` after merge. The deploy script records the current `APP_VERSION` for the first successful deploy record of a new git ref. Later staging, production, or swap records for the same git ref reuse the logged version.
+- **Version lives in `.env` as `APP_VERSION`**: Format `x.y.z` (semver). `/changelog` prepares the next main-bound changelog entry, and version-log recording bumps `.env` for a new successful git ref unless `.env` is already ahead of the newest successful row. Later staging, production, or swap records for the same git ref reuse the logged version.
 - **CSV columns and their purpose**:
   | Column | Value | Why |
   |--------|-------|-----|
@@ -62,7 +62,7 @@
 - [x] Add `APP_VERSION` to `env_schema.py` RUNTIME_SCHEMA (optional, default `0.0.0`)
 - [x] Create `scripts/deploy/deploy_log.py` with:
   - `append_deploy_record(...)` / `append_deploy_record_with_settings(...)` → writes newest row below the header
-  - CSV columns: `timestamp,git_ref,local_branch,version,target,stack_name,domain,image,status`
+  - CSV columns: `timestamp,git_ref,version,status,target,local_branch,stack_name,domain,image`
   - Auto-creates `out/deploy/` directory if missing
   - `git_ref` = full 40-char SHA from `git rev-parse HEAD`
   - `local_branch` = checked-out deploy branch, with legacy rows backfilled as `main`

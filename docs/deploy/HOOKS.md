@@ -51,6 +51,12 @@ and reads the same environment variables:
 
 Hooks for Ubuntu deployments should customize the application stack, not the shared platform control plane. The deploy script owns the central Caddy proxy, the external `caddy` Docker network, and the `portainer` admin container. Portainer is expected to be reachable through Caddy at `https://portainer.<base-domain>` on HTTPS port `443`; hooks should not assume direct host access to Portainer on `9000` or `9443`.
 
+Downstream repos that vendor this toolkit as a submodule should run their repo-local deploy wrapper from the downstream repo's virtual environment. The wrapper should call the upstream entrypoint with `repo_root_override` pointing at the downstream repo root. Helper scripts that need Python receive the active Python executable from the deploy engine, so downstream repos should not create or depend on a separate `.venv` inside the toolkit submodule.
+
+Downstream containers do not need to package toolkit proxy helper files. The shared proxy refresh preserves existing Caddy routes from the toolkit side, including temporary upstream checkouts that include the proxy shell script and template but omit standalone helper modules.
+
+Hooks that patch the shared proxy after deployment may rerun `docker compose up -d caddy` in the remote proxy directory. The toolkit refresh writes a proxy-local `.env` for those follow-up Compose commands, so hooks do not need to re-export Caddy Basic Auth or ACME variables.
+
 For web-facing upstream containers, hook customizations must preserve the shared ingress contract:
 
 - Attach the web service to the external `caddy` network.
@@ -160,12 +166,14 @@ For `ubuntu_deploy.py`, `deploy_result` includes:
 
 ### `configure_deploy_log(ctx, plan, settings)`
 - **Summary**: Before `ubuntu_deploy.py` writes `version_log.csv`.
-- **Use for**: Customizing where deploy tracking is written and whether deploy tracking enforces post-merge version rows.
+- **Use for**: Customizing where deploy tracking is written and whether deploy logging manages version bumps.
 
 The `settings` object is mutable:
 
 - `settings.csv_path` (`Path`): CSV path to write. Relative paths are resolved from `ctx.repo_root`.
-- `settings.versioning_enabled` (`bool`, default `True`): when `False`, deploy rows still record the current `APP_VERSION`. Merge records still bump `APP_VERSION` for a new git ref, but skip the changelog-entry check. When enabled, repeated records for the same git ref reuse the logged version; deploys for a new git ref use the current `APP_VERSION`.
+- `settings.versioning_enabled` (`bool`, default `True`): when `False`, deploy rows still record the current `APP_VERSION`. When enabled, repeated records for the same git ref reuse the logged version; successful merge or deploy records for a new git ref bump `APP_VERSION` from the newest successful version-log row unless `.env` is already ahead.
+
+Custom CSV paths use the same automatic schema migration as the default log. If the configured file has a supported older header, the next deploy-log write rewrites it to `timestamp,git_ref,version,status,target,local_branch,stack_name,domain,image` before preserving existing rows under the new record.
 
 ### `on_error(ctx, exc)`
 - **Summary**: If an exception occurs during the deployment lifecycle.

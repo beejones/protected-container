@@ -7,6 +7,11 @@ services:
       - ../../.env
       - ../../.env.secrets
       - ../../.env.deploy
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?required}
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?required}
+      BASIC_AUTH_USER: ${BASIC_AUTH_USER:?required}
+      BASIC_AUTH_HASH: ${BASIC_AUTH_HASH:?required}
     ports:
       - "80:80"
       - "443:443"

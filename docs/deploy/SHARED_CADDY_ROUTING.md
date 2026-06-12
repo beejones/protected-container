@@ -2,7 +2,7 @@
 
 ## Principles
 
-All public routes registered through the centralized Ubuntu Caddy proxy must inherit the same Caddy access gate before traffic is forwarded to an app container. Registration should be deterministic, idempotent, and safe to rerun: missing routes are appended, and stale unprotected routes are repaired instead of being silently treated as healthy.
+All public routes registered through the centralized Ubuntu Caddy proxy must inherit the same Caddy access gate before traffic is forwarded to the intended app container. Registration should be deterministic, idempotent, and safe to rerun: missing routes are appended, and stale routes are repaired when they are unprotected or point at the wrong upstream service/port instead of being silently treated as healthy.
 
 This guide explains how other projects deployed on the same Ubuntu server can register with the centralized Caddy proxy for automatic HTTPS routing — without needing their own sidecar proxies.
 
@@ -15,9 +15,9 @@ Registration is **fully automated** by the `ubuntu_deploy.py` script.  All you n
 
 1. Prepare your project's `docker-compose.yml` (network + container name).
 2. Set the right env vars in `.env.deploy`.
-3. Run `ubuntu_deploy.py` — the proxy Caddyfile is synced, `central-proxy` is recreated so stale routes are dropped, and app routes are registered for you.
+3. Run `ubuntu_deploy.py` — the app assets are synced without overwriting the central proxy Caddyfile, the proxy template is merged with existing shared routes, `central-proxy` is recreated, and app routes are registered for you.
 
-The generated site block includes the centralized proxy `basic_auth` guard using the existing `BASIC_AUTH_USER` and `BASIC_AUTH_HASH` placeholders. App-specific auth such as session login or API keys remains separate defense-in-depth behind that Caddy boundary.
+The generated site block includes the centralized proxy `basic_auth` guard using the existing `BASIC_AUTH_USER` and `BASIC_AUTH_HASH` placeholders and a `reverse_proxy <service>:<port>` upstream derived from `PORTAINER_STACK_NAME` and `WEB_PORT`. App-specific auth such as session login or API keys remains separate defense-in-depth behind that Caddy boundary.
 
 ## Portainer Through Caddy
 
@@ -91,15 +91,20 @@ source .venv/bin/activate
 python scripts/deploy/ubuntu_deploy.py
 ```
 
+For downstream repos that vendor this toolkit as a submodule, follow the upstream container and wrapper contract in [HOOKS.md](HOOKS.md).
+
 The deploy script automatically:
 
-1. Syncs the repo-owned proxy files to the remote host.
-2. Recreates `central-proxy` so Caddy mounts the latest Caddyfile and drops stale routes from earlier experiments.
-3. Reads the proxy Caddyfile on the remote host via SSH.
-4. Checks whether a site block for `PUBLIC_DOMAIN` already exists (idempotent).
-5. If missing, appends a protected site block with `basic_auth` plus `reverse_proxy <service>:<port>`.
-6. If an existing domain block is present but unprotected, rewrites it with the standard `basic_auth` guard.
-7. Restarts the `central-proxy` container and validates the config after route changes.
+1. Syncs app compose and docker assets while excluding `docker/proxy/Caddyfile`, because the central proxy Caddyfile is shared infrastructure.
+2. Reads the existing remote proxy Caddyfile and preserves site blocks that are not present in the repo-owned proxy template.
+3. Stages the merged proxy files on the remote host, writes a proxy-local `.env` for follow-up Compose commands, and validates the candidate Caddyfile with the same Basic Auth environment values that will be passed to the live proxy.
+4. Syncs the validated proxy files to the live proxy directory.
+5. Recreates `central-proxy` so Caddy mounts the latest validated Caddyfile.
+6. Reads the proxy Caddyfile on the remote host via SSH.
+7. Checks whether a literal site block for `PUBLIC_DOMAIN`, or a matching `{$PUBLIC_DOMAIN}` placeholder block, already exists with both `basic_auth` and the expected `reverse_proxy <service>:<port>` upstream.
+8. If missing, appends a protected site block with `basic_auth` plus `reverse_proxy <service>:<port>`.
+9. If an existing domain or placeholder block is unprotected or points at a stale upstream, rewrites it with the standard `basic_auth` guard and expected upstream.
+10. Restarts the `central-proxy` container and validates the config after route changes.
 
 No manual SSH or Caddyfile editing required.
 

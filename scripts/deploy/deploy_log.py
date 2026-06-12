@@ -1,13 +1,14 @@
 """Version log CSV logger.
 
 Writes a row to `out/deploy/version_log.csv` after each deploy, recording
-the git ref, local branch, version, target environment, stack name, domain,
-image, and status.
+the git ref, version, status, target environment, local branch, stack name,
+domain, and image.
 Newest records are stored directly under the CSV header.
 
 For a git ref that already has a successful record, later records reuse the
-version already recorded in the version log. For a new git ref, the log records
-the current APP_VERSION without inferring a future version from existing rows.
+version already recorded in the version log. For a new successful git ref, the
+log advances APP_VERSION from the newest successful version-log row before the
+new row is written.
 """
 
 from __future__ import annotations
@@ -24,6 +25,18 @@ from dotenv import dotenv_values
 
 
 CSV_COLUMNS = [
+    "timestamp",
+    "git_ref",
+    "version",
+    "status",
+    "target",
+    "local_branch",
+    "stack_name",
+    "domain",
+    "image",
+]
+
+PREVIOUS_CSV_COLUMNS = [
     "timestamp",
     "git_ref",
     "local_branch",
@@ -48,6 +61,7 @@ LEGACY_CSV_COLUMNS = [
 
 _SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 _GIT_REF_COLUMN = CSV_COLUMNS.index("git_ref")
+_VERSION_COLUMN = CSV_COLUMNS.index("version")
 _STATUS_COLUMN = CSV_COLUMNS.index("status")
 _MERGE_TARGET = "merge"
 
@@ -57,6 +71,13 @@ class DeployLogSettings:
     """Mutable deploy-log settings exposed to deployment hooks."""
     csv_path: Path
     versioning_enabled: bool = True
+
+
+@dataclass(frozen=True)
+class DeployLogRows:
+    """Deploy-log rows normalized to the current CSV schema."""
+    rows: list[list[str]]
+    requires_rewrite: bool
 
 
 def _run_git_command(repo_root: Path, args: list[str]) -> str:
@@ -99,12 +120,17 @@ def _read_app_version(repo_root: Path) -> str:
     return str(values.get("APP_VERSION") or "0.0.0").strip() or "0.0.0"
 
 
-def _increment_patch(version: str) -> str:
-    """Increment the patch component of a semver string."""
+def _parse_semver(version: str) -> tuple[int, int, int]:
+    """Return semver components for a valid x.y.z version."""
     match = _SEMVER_RE.match(version.strip())
     if not match:
-        raise RuntimeError("APP_VERSION must be valid x.y.z semver before recording a merged git ref.")
-    major, minor, patch = int(match.group(1)), int(match.group(2)), int(match.group(3))
+        raise RuntimeError("APP_VERSION must be valid x.y.z semver before recording a git ref.")
+    return int(match.group(1)), int(match.group(2)), int(match.group(3))
+
+
+def _increment_patch(version: str) -> str:
+    """Increment the patch component of a semver string."""
+    major, minor, patch = _parse_semver(version)
     return f"{major}.{minor}.{patch + 1}"
 
 
@@ -151,6 +177,13 @@ def _resolve_csv_path(*, repo_root: Path, csv_path: Path) -> Path:
     return repo_root / csv_path
 
 
+def _csv_cell(row: list[str], index: int) -> str:
+    """Return a CSV row cell, preserving malformed short rows with blanks."""
+    if index >= len(row):
+        return ""
+    return row[index]
+
+
 def _successful_deploy_version_for_git_ref(*, git_ref: str, existing_rows: list[list[str]]) -> str:
     """Return the newest successful deploy version for a git ref."""
     for row in existing_rows:
@@ -159,30 +192,135 @@ def _successful_deploy_version_for_git_ref(*, git_ref: str, existing_rows: list[
         row_git_ref = str(row[_GIT_REF_COLUMN] or "").strip()
         status = str(row[_STATUS_COLUMN] or "").strip()
         if status == "success" and row_git_ref == git_ref:
-            return str(row[CSV_COLUMNS.index("version")] or "").strip()
+            return str(row[_VERSION_COLUMN] or "").strip()
     return ""
 
 
-def _normalize_existing_row(row: list[str]) -> list[str]:
-    """Return a current-schema deploy log row, backfilling legacy rows."""
-    if len(row) == len(CSV_COLUMNS):
-        return row
+def _newest_successful_version(*, existing_rows: list[list[str]]) -> str:
+    """Return the newest successful version recorded in the version log."""
+    for row in existing_rows:
+        if len(row) < len(CSV_COLUMNS):
+            continue
+        status = str(row[_STATUS_COLUMN] or "").strip()
+        version = str(row[_VERSION_COLUMN] or "").strip()
+        if status == "success" and version:
+            return version
+    return ""
+
+
+def _next_version_after_previous_success(*, current_version: str, previous_version: str) -> str:
+    """Return the version to record for a new git ref after a previous success."""
+    current_semver = _parse_semver(current_version)
+    previous_semver = _parse_semver(previous_version)
+    if current_semver > previous_semver:
+        return current_version.strip()
+    return _increment_patch(previous_version)
+
+
+def _resolve_successful_record_version(
+    *,
+    repo_root: Path,
+    git_ref: str,
+    current_version: str,
+    existing_rows: list[list[str]],
+) -> str:
+    """Resolve and persist the version for a successful merge or deploy row."""
+    existing_version = _successful_deploy_version_for_git_ref(
+        git_ref=git_ref,
+        existing_rows=existing_rows,
+    )
+    if existing_version:
+        return existing_version
+
+    previous_version = _newest_successful_version(existing_rows=existing_rows)
+    if not previous_version:
+        _validate_app_version(current_version)
+        return current_version
+
+    next_version = _next_version_after_previous_success(
+        current_version=current_version,
+        previous_version=previous_version,
+    )
+    _write_app_version(repo_root, next_version)
+    return next_version
+
+
+def _normalize_current_row(row: list[str]) -> list[str]:
+    """Return a current-schema row padded to the current column count."""
+    return [_csv_cell(row, index) for index in range(len(CSV_COLUMNS))]
+
+
+def _normalize_previous_row(row: list[str]) -> list[str]:
+    """Return a previous nine-column row in the current schema order."""
+    return [
+        _csv_cell(row, 0),
+        _csv_cell(row, 1),
+        _csv_cell(row, 3),
+        _csv_cell(row, 8),
+        _csv_cell(row, 4),
+        _csv_cell(row, 2),
+        _csv_cell(row, 5),
+        _csv_cell(row, 6),
+        _csv_cell(row, 7),
+    ]
+
+
+def _normalize_legacy_row(row: list[str]) -> list[str]:
+    """Return an older eight-column row in the current schema order."""
+    return [
+        _csv_cell(row, 0),
+        _csv_cell(row, 1),
+        _csv_cell(row, 2),
+        _csv_cell(row, 7),
+        _csv_cell(row, 3),
+        "main",
+        _csv_cell(row, 4),
+        _csv_cell(row, 5),
+        _csv_cell(row, 6),
+    ]
+
+
+def _normalize_existing_row(row: list[str], header: list[str]) -> list[str]:
+    """Return a current-schema deploy log row for a supported CSV header."""
+    if header == CSV_COLUMNS:
+        return _normalize_current_row(row)
+    if header == PREVIOUS_CSV_COLUMNS:
+        return _normalize_previous_row(row)
+    if header == LEGACY_CSV_COLUMNS:
+        return _normalize_legacy_row(row)
     if len(row) == len(LEGACY_CSV_COLUMNS):
-        return [row[0], row[1], "main", *row[2:]]
-    return row
+        return _normalize_legacy_row(row)
+    if len(row) == len(PREVIOUS_CSV_COLUMNS):
+        return _normalize_previous_row(row)
+    return _normalize_current_row(row)
 
 
-def _read_existing_deploy_rows(csv_path: Path) -> list[list[str]]:
+def _read_existing_deploy_rows(csv_path: Path) -> DeployLogRows:
     """Read deploy-log rows using the current schema shape."""
     if not csv_path.exists() or csv_path.stat().st_size == 0:
-        return []
+        return DeployLogRows(rows=[], requires_rewrite=False)
     with csv_path.open(newline="") as f:
         rows = list(csv.reader(f))
     if not rows:
-        return []
-    if rows[0] == CSV_COLUMNS or rows[0] == LEGACY_CSV_COLUMNS:
-        return [_normalize_existing_row(row) for row in rows[1:]]
-    return [_normalize_existing_row(row) for row in rows]
+        return DeployLogRows(rows=[], requires_rewrite=False)
+    header = rows[0]
+    if header in (CSV_COLUMNS, PREVIOUS_CSV_COLUMNS, LEGACY_CSV_COLUMNS):
+        return DeployLogRows(
+            rows=[_normalize_existing_row(row, header) for row in rows[1:]],
+            requires_rewrite=header != CSV_COLUMNS,
+        )
+    return DeployLogRows(
+        rows=[_normalize_existing_row(row, []) for row in rows],
+        requires_rewrite=True,
+    )
+
+
+def _write_deploy_rows(csv_path: Path, rows: list[list[str]]) -> None:
+    """Write deploy-log rows under the current schema header."""
+    with csv_path.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(CSV_COLUMNS)
+        writer.writerows(rows)
 
 
 def require_version_record_for_deploy(
@@ -252,33 +390,30 @@ def append_deploy_record_with_settings(
     resolved_version = version if version is not None else _read_app_version(repo_root)
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    existing_rows = _read_existing_deploy_rows(csv_path)
+    deploy_log_rows = _read_existing_deploy_rows(csv_path)
+    existing_rows = deploy_log_rows.rows
 
-    if settings.versioning_enabled and version is None:
-        existing_version = _successful_deploy_version_for_git_ref(
+    if settings.versioning_enabled and version is None and status == "success":
+        resolved_version = _resolve_successful_record_version(
+            repo_root=repo_root,
             git_ref=resolved_git_ref,
+            current_version=resolved_version,
             existing_rows=existing_rows,
         )
-        if existing_version:
-            resolved_version = existing_version
 
     new_row = [
         timestamp,
         resolved_git_ref,
-        resolved_local_branch,
         resolved_version,
+        status,
         target,
+        resolved_local_branch,
         stack_name,
         domain,
         image,
-        status,
     ]
 
-    with csv_path.open("w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(CSV_COLUMNS)
-        writer.writerow(new_row)
-        writer.writerows(existing_rows)
+    _write_deploy_rows(csv_path, [new_row, *existing_rows])
 
     return csv_path
 
@@ -291,18 +426,20 @@ def append_merge_record(
     local_branch: str | None = None,
     version: str | None = None,
 ) -> Path:
-    """Record the current app version for a git ref unless that ref is already logged."""
+    """Record the resolved app version for a git ref unless that ref is already logged."""
     resolved_settings = settings if settings is not None else default_deploy_log_settings(repo_root)
     csv_path = _resolve_csv_path(repo_root=repo_root, csv_path=resolved_settings.csv_path)
-    existing_rows = _read_existing_deploy_rows(csv_path)
+    deploy_log_rows = _read_existing_deploy_rows(csv_path)
+    existing_rows = deploy_log_rows.rows
     resolved_git_ref = git_ref if git_ref is not None else _get_git_ref(repo_root)
     if _successful_deploy_version_for_git_ref(git_ref=resolved_git_ref, existing_rows=existing_rows):
+        if deploy_log_rows.requires_rewrite:
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            _write_deploy_rows(csv_path, existing_rows)
         return csv_path
 
-    current_version = _read_app_version(repo_root)
-    resolved_version = version if version is not None else current_version
-    if resolved_settings.versioning_enabled:
-        _validate_app_version(resolved_version)
+    if resolved_settings.versioning_enabled and version is not None:
+        _validate_app_version(version)
 
     written_path = append_deploy_record_with_settings(
         repo_root=repo_root,
@@ -314,7 +451,7 @@ def append_merge_record(
         status="success",
         git_ref=resolved_git_ref,
         local_branch=local_branch,
-        version=resolved_version,
+        version=version,
     )
     return written_path
 
