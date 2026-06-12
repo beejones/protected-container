@@ -97,13 +97,14 @@ The deploy script automatically:
 
 1. Syncs app compose and docker assets while excluding `docker/proxy/Caddyfile`, because the central proxy Caddyfile is shared infrastructure.
 2. Reads the existing remote proxy Caddyfile and preserves site blocks that are not present in the repo-owned proxy template.
-3. Syncs the merged proxy files to the remote host.
-4. Recreates `central-proxy` so Caddy mounts the latest merged Caddyfile.
-5. Reads the proxy Caddyfile on the remote host via SSH.
-6. Checks whether a literal site block for `PUBLIC_DOMAIN`, or a matching `{$PUBLIC_DOMAIN}` placeholder block, already exists with both `basic_auth` and the expected `reverse_proxy <service>:<port>` upstream.
-7. If missing, appends a protected site block with `basic_auth` plus `reverse_proxy <service>:<port>`.
-8. If an existing domain or placeholder block is unprotected or points at a stale upstream, rewrites it with the standard `basic_auth` guard and expected upstream.
-9. Restarts the `central-proxy` container and validates the config after route changes.
+3. Stages the merged proxy files on the remote host and validates the candidate Caddyfile with the same Basic Auth environment values that will be passed to the live proxy.
+4. Syncs the validated proxy files to the live proxy directory.
+5. Recreates `central-proxy` so Caddy mounts the latest validated Caddyfile.
+6. Reads the proxy Caddyfile on the remote host via SSH.
+7. Checks whether a literal site block for `PUBLIC_DOMAIN`, or a matching `{$PUBLIC_DOMAIN}` placeholder block, already exists with both `basic_auth` and the expected `reverse_proxy <service>:<port>` upstream.
+8. If missing, appends a protected site block with `basic_auth` plus `reverse_proxy <service>:<port>`.
+9. If an existing domain or placeholder block is unprotected or points at a stale upstream, rewrites it with the standard `basic_auth` guard and expected upstream.
+10. Restarts the `central-proxy` container and validates the config after route changes.
 
 No manual SSH or Caddyfile editing required.
 

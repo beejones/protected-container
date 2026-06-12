@@ -28,8 +28,28 @@ if [ -z "${PUBLIC_DOMAIN:-}" ]; then
   exit 1
 fi
 
+if [ -z "${BASIC_AUTH_USER:-}" ]; then
+  echo "[proxy-deploy] ❌ Error: BASIC_AUTH_USER is not set in .env or .env.secrets"
+  exit 1
+fi
+
+if [ -z "${BASIC_AUTH_HASH:-}" ]; then
+  echo "[proxy-deploy] ❌ Error: BASIC_AUTH_HASH is not set in .env or .env.secrets"
+  exit 1
+fi
+
+shell_quote() {
+  printf "%q" "$1"
+}
+
+ACME_EMAIL_REMOTE="$(shell_quote "${ACME_EMAIL}")"
+PUBLIC_DOMAIN_REMOTE="$(shell_quote "${PUBLIC_DOMAIN}")"
+BASIC_AUTH_USER_REMOTE="$(shell_quote "${BASIC_AUTH_USER}")"
+BASIC_AUTH_HASH_REMOTE="$(shell_quote "${BASIC_AUTH_HASH}")"
+
 DEFAULT_PROXY_BASE="${UBUNTU_REMOTE_DIR:-~/containers/protected-container}"
 PROXY_DIR="${UBUNTU_PROXY_DIR:-${DEFAULT_PROXY_BASE}/docker/proxy}"
+REMOTE_STAGE_DIR="${PROXY_DIR}.candidate.$(date +%s).$$"
 
 echo "[proxy-deploy] 🚀 Deploying Central Caddy Proxy to ${UBUNTU_SSH_HOST}..."
 
@@ -41,6 +61,7 @@ mkdir -p "${TMP_BASE}"
 PRESERVE_TMP_DIR="$(mktemp -d "${TMP_BASE}/caddy-proxy.XXXXXX")"
 cleanup_preserve_tmp() {
   rm -rf "${PRESERVE_TMP_DIR}"
+  ssh "${UBUNTU_SSH_HOST}" "rm -rf ${REMOTE_STAGE_DIR}" >/dev/null 2>&1 || true
 }
 trap cleanup_preserve_tmp EXIT
 
@@ -135,6 +156,33 @@ fi
 
 rsync -a docker/proxy/ "${STAGED_PROXY_DIR}/"
 preserve_caddy_routes "${REMOTE_CADDYFILE}" docker/proxy/Caddyfile "${STAGED_PROXY_DIR}/Caddyfile"
+
+echo "[proxy-deploy] 🧪 Validating candidate proxy configuration..."
+ssh "${UBUNTU_SSH_HOST}" "rm -rf ${REMOTE_STAGE_DIR} && mkdir -p ${REMOTE_STAGE_DIR}"
+rsync -avz "${STAGED_PROXY_DIR}/" "${UBUNTU_SSH_HOST}:${REMOTE_STAGE_DIR}/"
+ssh "${UBUNTU_SSH_HOST}" "
+  cd ${REMOTE_STAGE_DIR}
+  export ACME_EMAIL=${ACME_EMAIL_REMOTE}
+  export PUBLIC_DOMAIN=${PUBLIC_DOMAIN_REMOTE}
+  export BASIC_AUTH_USER=${BASIC_AUTH_USER_REMOTE}
+  export BASIC_AUTH_HASH=${BASIC_AUTH_HASH_REMOTE}
+  if docker compose version >/dev/null 2>&1; then
+    docker compose config >/dev/null
+  elif command -v docker-compose >/dev/null 2>&1; then
+    docker-compose config >/dev/null
+  else
+    echo '[proxy-deploy] ❌ Error: Docker Compose is not installed on the remote host. Install docker-compose-v2 or docker-compose and retry.' >&2
+    exit 1
+  fi
+  docker run --rm \
+    -e ACME_EMAIL \
+    -e PUBLIC_DOMAIN \
+    -e BASIC_AUTH_USER \
+    -e BASIC_AUTH_HASH \
+    -v ${REMOTE_STAGE_DIR}/Caddyfile:/etc/caddy/Caddyfile:ro \
+    caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+"
+
 rsync -avz "${STAGED_PROXY_DIR}/" "${UBUNTU_SSH_HOST}:${PROXY_DIR}/"
 
 echo "[proxy-deploy] 🌐 Ensuring external 'caddy' network exists..."
@@ -144,8 +192,10 @@ echo "[proxy-deploy] 🟢 Starting proxy on remote host..."
 # We explicitly pass the environment variables inline to docker compose to ensure they are available
 ssh "${UBUNTU_SSH_HOST}" "
   cd ${PROXY_DIR}
-  export ACME_EMAIL='${ACME_EMAIL}'
-  export PUBLIC_DOMAIN='${PUBLIC_DOMAIN}'
+  export ACME_EMAIL=${ACME_EMAIL_REMOTE}
+  export PUBLIC_DOMAIN=${PUBLIC_DOMAIN_REMOTE}
+  export BASIC_AUTH_USER=${BASIC_AUTH_USER_REMOTE}
+  export BASIC_AUTH_HASH=${BASIC_AUTH_HASH_REMOTE}
   if docker compose version >/dev/null 2>&1; then
     docker compose up -d --force-recreate --remove-orphans
   elif command -v docker-compose >/dev/null 2>&1; then

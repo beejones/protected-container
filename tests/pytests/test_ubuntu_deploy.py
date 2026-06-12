@@ -478,6 +478,25 @@ def test_proxy_deploy_script_force_recreates_caddy_to_flush_synced_caddyfile():
     assert "caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile" in script_text
 
 
+def test_proxy_compose_accepts_basic_auth_environment_overrides():
+    repo_root = Path(__file__).resolve().parents[2]
+    compose_text = (repo_root / "docker" / "proxy" / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "BASIC_AUTH_USER: ${BASIC_AUTH_USER:?required}" in compose_text
+    assert "BASIC_AUTH_HASH: ${BASIC_AUTH_HASH:?required}" in compose_text
+
+
+def test_proxy_deploy_script_prevalidates_before_recreating_caddy():
+    repo_root = Path(__file__).resolve().parents[2]
+    script_text = (repo_root / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh").read_text(encoding="utf-8")
+
+    prevalidate = "docker run --rm"
+    recreate = "docker compose up -d --force-recreate --remove-orphans"
+    assert prevalidate in script_text
+    assert "caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile" in script_text
+    assert script_text.index(prevalidate) < script_text.index(recreate)
+
+
 def test_proxy_deploy_script_preserves_existing_shared_routes_before_sync():
     repo_root = Path(__file__).resolve().parents[2]
     script_text = (repo_root / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh").read_text(encoding="utf-8")
@@ -510,7 +529,17 @@ def test_proxy_deploy_script_preserves_routes_without_helper_file(tmp_path):
     script_dir.mkdir(parents=True)
     fake_bin.mkdir()
     synced_proxy_dir.mkdir()
-    (temp_repo / ".env").write_text("ACME_EMAIL=ops@example.com\n", encoding="utf-8")
+    (temp_repo / ".env").write_text(
+        "\n".join(
+            [
+                "ACME_EMAIL=ops@example.com",
+                "BASIC_AUTH_USER=admin",
+                "BASIC_AUTH_HASH='$2a$14$abcdefghijklmnopqrstuvabcdefghijklmnopqrstuvabcdefghijkl'",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     (temp_repo / ".env.deploy").write_text(
         "\n".join(
             [
