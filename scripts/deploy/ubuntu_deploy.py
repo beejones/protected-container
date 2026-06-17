@@ -62,6 +62,8 @@ ENV_DEPLOY_HOOKS_SOFT_FAIL = "DEPLOY_HOOKS_SOFT_FAIL"
 ENV_STAGING_PUBLIC_DOMAIN = "STAGING_PUBLIC_DOMAIN"
 ENV_STAGING_REMOTE_DIR = "STAGING_REMOTE_DIR"
 ENV_STAGING_PORTAINER_STACK_NAME = "STAGING_PORTAINER_STACK_NAME"
+ENV_UBUNTU_NO_SSH = "UBUNTU_NO_SSH"
+ENV_PORTAINER_API_HOST = "PORTAINER_API_HOST"
 
 UNSUPPORTED_EDGE_AUTH_DEPLOY_KEYS: frozenset[str] = frozenset(
     {
@@ -255,7 +257,15 @@ def derive_portainer_host_from_public_domain(public_domain: str) -> str:
     return "portainer." + ".".join(labels[1:])
 
 
-def resolve_portainer_api_host(*, repo_root: Path, ssh_host: str) -> str:
+def resolve_portainer_api_host(*, repo_root: Path, ssh_host: str, portainer_api_host: str = "") -> str:
+    explicit_host = portainer_api_host.strip()
+    if not explicit_host:
+        explicit_host = str(os.getenv(ENV_PORTAINER_API_HOST) or "").strip()
+    if not explicit_host:
+        explicit_host = read_deploy_key(repo_root=repo_root, key=ENV_PORTAINER_API_HOST)
+    if explicit_host:
+        return explicit_host
+
     public_domain = str(os.getenv(ENV_PUBLIC_DOMAIN) or "").strip()
     if not public_domain:
         public_domain = read_deploy_key(repo_root=repo_root, key=ENV_PUBLIC_DOMAIN)
@@ -264,12 +274,16 @@ def resolve_portainer_api_host(*, repo_root: Path, ssh_host: str) -> str:
     if derived_portainer_host:
         return derived_portainer_host
 
+    if not ssh_host:
+        raise SystemExit(
+            "Missing Portainer API host: provide --portainer-api-host, set PORTAINER_API_HOST, or provide an SSH host to derive it."
+        )
     return resolve_network_host_from_ssh_target(ssh_host)
 
 
 def default_portainer_https_port(*, portainer_host: str, ssh_host: str) -> int:
     portainer_hostname = _hostname_from_urlish(portainer_host)
-    ssh_hostname = _hostname_from_urlish(portainer_helpers.extract_ssh_hostname(ssh_host))
+    ssh_hostname = _hostname_from_urlish(portainer_helpers.extract_ssh_hostname(ssh_host)) if ssh_host else ""
     if portainer_hostname and ssh_hostname and portainer_hostname != ssh_hostname:
         return 443
     return 9943
@@ -706,6 +720,16 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         help="SSH target in the form user@host. Resolution: CLI -> UBUNTU_SSH_HOST env var -> .env.deploy",
     )
     parser.add_argument(
+        "--no-ssh",
+        action="store_true",
+        help="Disable all SSH and rsync actions. Deploy using Portainer API/webhooks only.",
+    )
+    parser.add_argument(
+        "--portainer-api-host",
+        default=None,
+        help="Portainer host/domain (overrides PORTAINER_API_HOST env var). Required if --no-ssh is used and no SSH host is defined.",
+    )
+    parser.add_argument(
         "--remote-dir",
         default=None,
         help=(
@@ -828,19 +852,36 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     hooks.call("pre_validate_env", hook_ctx)
     validate_no_unsupported_edge_auth_deploy_keys(repo_root=repo_root)
 
+    no_ssh_enabled = bool(args.no_ssh)
+    if not no_ssh_enabled:
+        no_ssh_raw = str(os.getenv(ENV_UBUNTU_NO_SSH) or "").strip()
+        if not no_ssh_raw:
+            no_ssh_raw = read_deploy_key(repo_root=repo_root, key=ENV_UBUNTU_NO_SSH)
+        no_ssh_enabled = parse_boolish(no_ssh_raw, default=True)
+
     resolved_host = str(args.host or "").strip()
     if not resolved_host:
         resolved_host = str(os.getenv(ENV_UBUNTU_SSH_HOST) or "").strip()
     if not resolved_host:
         resolved_host = read_deploy_key(repo_root=repo_root, key=ENV_UBUNTU_SSH_HOST)
+    
     if not resolved_host:
+        no_ssh_enabled = True
+
+    if not resolved_host and not no_ssh_enabled:
         raise SystemExit("Missing SSH host: provide --host, set UBUNTU_SSH_HOST, or add UBUNTU_SSH_HOST to .env.deploy")
-    resolved_portainer_host = resolve_portainer_api_host(repo_root=repo_root, ssh_host=resolved_host)
+
+    resolved_portainer_api_host_arg = str(args.portainer_api_host or "").strip()
+    resolved_portainer_host = resolve_portainer_api_host(
+        repo_root=repo_root,
+        ssh_host=resolved_host,
+        portainer_api_host=resolved_portainer_api_host_arg,
+    )
 
     resolved_remote_dir = str(args.remote_dir or "").strip()
     if not resolved_remote_dir:
         # Staging overrides: use STAGING_REMOTE_DIR when deploying to staging
-        if deploy_target == "staging":
+        if deploy_target == "staging" and not no_ssh_enabled:
             resolved_remote_dir = str(os.getenv(ENV_STAGING_REMOTE_DIR) or "").strip()
             if not resolved_remote_dir:
                 resolved_remote_dir = read_deploy_key(repo_root=repo_root, key=ENV_STAGING_REMOTE_DIR)
@@ -1097,114 +1138,117 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     log_step(f"Prepared deployment plan [{deploy_target.upper()}]", icon="🧭")
     log_info(f"Target environment: {deploy_target}")
     log_info(f"Version: {deploy_log._read_app_version(repo_root)}")
-    log_info(f"Host: {resolved_host}")
-    if resolved_portainer_host and resolved_portainer_host != portainer_helpers.extract_ssh_hostname(resolved_host):
+    log_info(f"Host: {resolved_host if resolved_host else '(none, SSH disabled)'}")
+    if resolved_portainer_host and resolved_portainer_host != (portainer_helpers.extract_ssh_hostname(resolved_host) if resolved_host else ""):
         log_info(f"Portainer API host: {resolved_portainer_host}")
     log_info(f"Remote dir: {remote_dir}")
     log_info(f"Compose files: {compose_files}")
     if storage_registrations:
         log_info(f"Detected {len(storage_registrations)} storage-manager label registration(s)", icon="🧹")
 
-    log_step("Checking SSH connectivity", icon="🔌")
-    try:
-        subprocess.run(
-            build_ssh_connectivity_cmd(host=resolved_host),
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-    except subprocess.TimeoutExpired:
-        raise SystemExit(
-            "SSH connectivity check timed out after 15s. "
-            "Verify the server is online and reachable on port 22."
-        )
-    except subprocess.CalledProcessError as exc:
-        detail = _subprocess_error_text(exc)
-        message = "SSH connectivity check failed before deployment."
-        if detail:
-            message = f"{message} {detail}"
-        hint = _ssh_failure_hint(detail)
-        if hint:
-            message = f"{message} {hint}"
-        raise SystemExit(message)
-
-    # Ensure remote dir exists.
-    log_step("Ensuring remote deployment directory exists", icon="📁")
-    _run(
-        build_ssh_cmd(host=resolved_host, remote_command=f"mkdir -p {shlex.quote(str(remote_dir))}"),
-        action="Failed to create remote deployment directory over SSH",
-    )
-
-    # Sync compose files and docker/ directory.
-    log_step("Syncing compose files and docker assets", icon="📦")
-    sync_paths: list[Path] = [repo_root / cf for cf in compose_files] + [repo_root / "docker"]
-    _run(
-        build_rsync_cmd(
-            sources=sync_paths,
-            host=resolved_host,
-            remote_dir=remote_dir,
-            exclude_patterns=("proxy/Caddyfile", "docker/proxy/Caddyfile"),
-        ),
-        action="Failed to sync compose files and docker assets",
-    )
-
-    if resolved_sync_secrets:
-        env_paths: list[Path] = []
-        for name in [".env", ".env.secrets", ".env.deploy", ".env.deploy.secrets"]:
-            p = repo_root / name
-            if p.exists():
-                env_paths.append(p)
-            else:
-                log_info(f"Skipping missing {p}", icon="⚠️")
-        if env_paths:
-            log_step("Syncing environment files", icon="🔐")
-            _run(
-                build_rsync_cmd(sources=env_paths, host=resolved_host, remote_dir=remote_dir),
-                action="Failed to sync environment files",
-            )
-        else:
-            log_info("No env files to sync")
-
-    log_step("Ensuring Portainer is running on remote host", icon="🛡️")
-    _run(
-        build_ssh_cmd(
-            host=resolved_host,
-            remote_command=portainer_helpers.portainer_ensure_running_remote_cmd(https_port=resolved_portainer_https_port),
-        ),
-        action="Failed to ensure Portainer is running on the remote host",
-    )
-
-    if ghcr_images_in_stack and resolved_ghcr_username and resolved_ghcr_token:
-        for image in ghcr_images_in_stack:
-            log_step(f"Logging into GHCR and pre-pulling {image} on remote host", icon="🔐")
-            _run(
-                build_ssh_cmd(
-                    host=resolved_host,
-                    remote_command=ghcr_login_pull_remote_cmd(
-                        image=image,
-                        username=resolved_ghcr_username,
-                        token=resolved_ghcr_token,
-                    ),
-                ),
-                action=f"Failed remote GHCR login/pull for image {image}",
-            )
-
-    log_step("Refreshing Central Caddy Proxy", icon="🌐")
-    proxy_script = repo_root / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh"
-    if proxy_script.exists():
+    if not no_ssh_enabled:
+        log_step("Checking SSH connectivity", icon="🔌")
         try:
-            proxy_env = os.environ.copy()
-            proxy_env["PYTHON_BIN"] = sys.executable
-            subprocess.run(["bash", str(proxy_script)], check=True, env=proxy_env)
+            subprocess.run(
+                build_ssh_connectivity_cmd(host=resolved_host),
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except subprocess.TimeoutExpired:
+            raise SystemExit(
+                "SSH connectivity check timed out after 15s. "
+                "Verify the server is online and reachable on port 22."
+            )
         except subprocess.CalledProcessError as exc:
             detail = _subprocess_error_text(exc)
-            message = "Failed to refresh central proxy via ubuntu_deploy_proxy.sh"
+            message = "SSH connectivity check failed before deployment."
             if detail:
-                message = f"{message}: {detail}"
+                message = f"{message} {detail}"
+            hint = _ssh_failure_hint(detail)
+            if hint:
+                message = f"{message} {hint}"
             raise SystemExit(message)
+
+        # Ensure remote dir exists.
+        log_step("Ensuring remote deployment directory exists", icon="📁")
+        _run(
+            build_ssh_cmd(host=resolved_host, remote_command=f"mkdir -p {shlex.quote(str(remote_dir))}"),
+            action="Failed to create remote deployment directory over SSH",
+        )
+
+        # Sync compose files and docker/ directory.
+        log_step("Syncing compose files and docker assets", icon="📦")
+        sync_paths: list[Path] = [repo_root / cf for cf in compose_files] + [repo_root / "docker"]
+        _run(
+            build_rsync_cmd(
+                sources=sync_paths,
+                host=resolved_host,
+                remote_dir=remote_dir,
+                exclude_patterns=("proxy/Caddyfile", "docker/proxy/Caddyfile"),
+            ),
+            action="Failed to sync compose files and docker assets",
+        )
+
+        if resolved_sync_secrets:
+            env_paths: list[Path] = []
+            for name in [".env", ".env.secrets", ".env.deploy", ".env.deploy.secrets"]:
+                p = repo_root / name
+                if p.exists():
+                    env_paths.append(p)
+                else:
+                    log_info(f"Skipping missing {p}", icon="⚠️")
+            if env_paths:
+                log_step("Syncing environment files", icon="🔐")
+                _run(
+                    build_rsync_cmd(sources=env_paths, host=resolved_host, remote_dir=remote_dir),
+                    action="Failed to sync environment files",
+                )
+            else:
+                log_info("No env files to sync")
+
+        log_step("Ensuring Portainer is running on remote host", icon="🛡️")
+        _run(
+            build_ssh_cmd(
+                host=resolved_host,
+                remote_command=portainer_helpers.portainer_ensure_running_remote_cmd(https_port=resolved_portainer_https_port),
+            ),
+            action="Failed to ensure Portainer is running on the remote host",
+        )
+
+        if ghcr_images_in_stack and resolved_ghcr_username and resolved_ghcr_token:
+            for image in ghcr_images_in_stack:
+                log_step(f"Logging into GHCR and pre-pulling {image} on remote host", icon="🔐")
+                _run(
+                    build_ssh_cmd(
+                        host=resolved_host,
+                        remote_command=ghcr_login_pull_remote_cmd(
+                            image=image,
+                            username=resolved_ghcr_username,
+                            token=resolved_ghcr_token,
+                        ),
+                    ),
+                    action=f"Failed remote GHCR login/pull for image {image}",
+                )
+
+        log_step("Refreshing Central Caddy Proxy", icon="🌐")
+        proxy_script = repo_root / "scripts" / "deploy" / "ubuntu_deploy_proxy.sh"
+        if proxy_script.exists():
+            try:
+                proxy_env = os.environ.copy()
+                proxy_env["PYTHON_BIN"] = sys.executable
+                subprocess.run(["bash", str(proxy_script)], check=True, env=proxy_env)
+            except subprocess.CalledProcessError as exc:
+                detail = _subprocess_error_text(exc)
+                message = "Failed to refresh central proxy via ubuntu_deploy_proxy.sh"
+                if detail:
+                    message = f"{message}: {detail}"
+                raise SystemExit(message)
+        else:
+            log_info(f"Warning: {proxy_script} not found. Cannot auto-refresh proxy.", icon="⚠️")
     else:
-        log_info(f"Warning: {proxy_script} not found. Cannot auto-refresh proxy.", icon="⚠️")
+        log_info("Skipping SSH connectivity check, remote sync, Portainer start, image pull, and proxy refresh (--no-ssh)", icon="🔌")
 
     used_remote_compose_fallback = False
 
@@ -1220,6 +1264,11 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         except SystemExit as exc:
             error_text = str(exc)
             if _should_fallback_to_remote_compose(error_text):
+                if no_ssh_enabled:
+                    raise SystemExit(
+                        f"Portainer access token test failed: {error_text}. "
+                        "Cannot fallback to direct Docker Compose because --no-ssh is active."
+                    )
                 log_info(
                     "Portainer is reachable but not initialized; falling back to direct Docker Compose deployment over SSH.",
                     icon="⚠️",
@@ -1293,7 +1342,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                 endpoint_id=resolved_portainer_endpoint_id,
                 access_token=resolved_portainer_access_token,
                 stack_file_content=stack_file_content,
-                ssh_run_fn=lambda remote_command: _run(build_ssh_cmd(host=resolved_host, remote_command=remote_command)),
+                ssh_run_fn=None if no_ssh_enabled else (lambda remote_command: _run(build_ssh_cmd(host=resolved_host, remote_command=remote_command))),
             )
         except requests.HTTPError as exc:
             status_code = int(getattr(getattr(exc, "response", None), "status_code", 0) or 0)
@@ -1377,66 +1426,69 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     if not resolved_public_domain:
         resolved_public_domain = read_deploy_key(repo_root=repo_root, key=ENV_PUBLIC_DOMAIN)
 
-    resolved_web_port = str(os.getenv(ENV_WEB_PORT) or "").strip()
-    if not resolved_web_port:
-        resolved_web_port = read_deploy_key(repo_root=repo_root, key=ENV_WEB_PORT)
-    if not resolved_web_port:
-        resolved_web_port = "3000"
+    if not no_ssh_enabled:
+        resolved_web_port = str(os.getenv(ENV_WEB_PORT) or "").strip()
+        if not resolved_web_port:
+            resolved_web_port = read_deploy_key(repo_root=repo_root, key=ENV_WEB_PORT)
+        if not resolved_web_port:
+            resolved_web_port = "3000"
 
-    resolved_caddy_proxy_dir = str(os.getenv(ENV_CADDY_PROXY_DIR) or "").strip()
-    if not resolved_caddy_proxy_dir:
-        resolved_caddy_proxy_dir = read_deploy_key(repo_root=repo_root, key=ENV_CADDY_PROXY_DIR)
+        resolved_caddy_proxy_dir = str(os.getenv(ENV_CADDY_PROXY_DIR) or "").strip()
+        if not resolved_caddy_proxy_dir:
+            resolved_caddy_proxy_dir = read_deploy_key(repo_root=repo_root, key=ENV_CADDY_PROXY_DIR)
 
-    if resolved_public_domain:
-        # Derive service name from the Portainer stack name (which matches the
-        # primary compose service name by convention).
-        service_name = resolved_portainer_stack_name or remote_dir.name
+        if resolved_public_domain:
+            # Derive service name from the Portainer stack name (which matches the
+            # primary compose service name by convention).
+            service_name = resolved_portainer_stack_name or remote_dir.name
 
-        # The proxy Caddyfile lives in the proxy stack's repo on the same host.
-        # Default convention: sibling path under protected-container.
-        # Override with CADDY_PROXY_DIR when downstream layout differs.
-        proxy_repo_dir = Path(resolved_caddy_proxy_dir) if resolved_caddy_proxy_dir else (remote_dir.parent / "protected-container")
-        caddyfile_path = str(proxy_repo_dir / "docker" / "proxy" / "Caddyfile")
+            # The proxy Caddyfile lives in the proxy stack's repo on the same host.
+            # Default convention: sibling path under protected-container.
+            # Override with CADDY_PROXY_DIR when downstream layout differs.
+            proxy_repo_dir = Path(resolved_caddy_proxy_dir) if resolved_caddy_proxy_dir else (remote_dir.parent / "protected-container")
+            caddyfile_path = str(proxy_repo_dir / "docker" / "proxy" / "Caddyfile")
 
-        log_step("Registering with centralized Caddy proxy", icon="🔒")
-        try:
-            caddy_register.ensure_caddy_registration(
-                ssh_host=resolved_host,
-                domain=resolved_public_domain,
-                service=service_name,
-                port=resolved_web_port,
-                caddyfile_path=caddyfile_path,
-            )
-
-            is_registered = caddy_register.is_domain_registered(
-                ssh_host=resolved_host,
-                domain=resolved_public_domain,
-                service=service_name,
-                port=resolved_web_port,
-                caddyfile_path=caddyfile_path,
-            )
-            if is_registered:
-                log_info(
-                    f"Caddy registration verified for {resolved_public_domain}.",
-                    icon="✅",
+            log_step("Registering with centralized Caddy proxy", icon="🔒")
+            try:
+                caddy_register.ensure_caddy_registration(
+                    ssh_host=resolved_host,
+                    domain=resolved_public_domain,
+                    service=service_name,
+                    port=resolved_web_port,
+                    caddyfile_path=caddyfile_path,
                 )
-            else:
+
+                is_registered = caddy_register.is_domain_registered(
+                    ssh_host=resolved_host,
+                    domain=resolved_public_domain,
+                    service=service_name,
+                    port=resolved_web_port,
+                    caddyfile_path=caddyfile_path,
+                )
+                if is_registered:
+                    log_info(
+                        f"Caddy registration verified for {resolved_public_domain}.",
+                        icon="✅",
+                    )
+                else:
+                    log_info(
+                        (
+                            f"Caddy registration could not be verified for {resolved_public_domain}. "
+                            f"Checked Caddyfile: {caddyfile_path}. "
+                            "Deployment continues, but HTTPS routing may be unavailable."
+                        ),
+                        icon="⚠️",
+                    )
+            except Exception as exc:
+                log_info(f"Caddy registration failed: {exc}", icon="⚠️")
                 log_info(
-                    (
-                        f"Caddy registration could not be verified for {resolved_public_domain}. "
-                        f"Checked Caddyfile: {caddyfile_path}. "
-                        "Deployment continues, but HTTPS routing may be unavailable."
-                    ),
+                    "Deployment completed, but public HTTPS routing may be unavailable until Caddy is fixed.",
                     icon="⚠️",
                 )
-        except Exception as exc:
-            log_info(f"Caddy registration failed: {exc}", icon="⚠️")
-            log_info(
-                "Deployment completed, but public HTTPS routing may be unavailable until Caddy is fixed.",
-                icon="⚠️",
-            )
+        else:
+            log_info("PUBLIC_DOMAIN not set — skipping Caddy registration.", icon="⚠️")
     else:
-        log_info("PUBLIC_DOMAIN not set — skipping Caddy registration.", icon="⚠️")
+        log_info("Skipping Caddy registration (--no-ssh)", icon="🔌")
 
     if storage_registrations:
         if default_storage_registration_enabled:

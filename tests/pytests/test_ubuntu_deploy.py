@@ -325,6 +325,7 @@ def test_main_allows_new_git_ref_before_remote_work(tmp_path, monkeypatch):
         "\n".join(
             [
                 "UBUNTU_SSH_HOST=deploy@example.com",
+                "UBUNTU_NO_SSH=false",
                 "UBUNTU_BUILD_PUSH=false",
                 "PUBLIC_DOMAIN=protected-container.zenia.eu",
                 "APP_IMAGE=example/app:staged",
@@ -636,6 +637,7 @@ def test_main_refreshes_central_proxy_even_when_container_exists(tmp_path, monke
         "\n".join(
             [
                 "UBUNTU_SSH_HOST=deploy@example.com",
+                "UBUNTU_NO_SSH=false",
                 "UBUNTU_REMOTE_DIR=/srv/prod",
                 "UBUNTU_BUILD_PUSH=false",
                 "PUBLIC_DOMAIN=protected-container.zenia.eu",
@@ -1251,3 +1253,258 @@ services:
 """
         assert stack_has_service(stack_content=stack_content, service_name="storage-manager") is True
         assert stack_has_service(stack_content=stack_content, service_name="missing") is False
+
+
+def test_resolve_portainer_api_host_respects_explicit_parameter(tmp_path, monkeypatch):
+    monkeypatch.delenv("PORTAINER_API_HOST", raising=False)
+    monkeypatch.delenv("PUBLIC_DOMAIN", raising=False)
+    # Explicit portainer_api_host arg
+    assert resolve_portainer_api_host(repo_root=tmp_path, ssh_host="", portainer_api_host="cli.portainer.io") == "cli.portainer.io"
+
+    # Environment variable PORTAINER_API_HOST
+    monkeypatch.setenv("PORTAINER_API_HOST", "env.portainer.io")
+    assert resolve_portainer_api_host(repo_root=tmp_path, ssh_host="", portainer_api_host="") == "env.portainer.io"
+    monkeypatch.delenv("PORTAINER_API_HOST")
+
+    # .env.deploy key PORTAINER_API_HOST
+    (tmp_path / ".env.deploy").write_text("PORTAINER_API_HOST=dotenv.portainer.io\n")
+    assert resolve_portainer_api_host(repo_root=tmp_path, ssh_host="", portainer_api_host="") == "dotenv.portainer.io"
+
+    # Missing both ssh_host and portainer_api_host -> SystemExit
+    (tmp_path / ".env.deploy").write_text("")
+    with pytest.raises(SystemExit, match="Missing Portainer API host"):
+        resolve_portainer_api_host(repo_root=tmp_path, ssh_host="")
+
+
+def test_main_runs_without_ssh_when_no_ssh_flag_provided(tmp_path, monkeypatch):
+    (tmp_path / "docker").mkdir()
+    (tmp_path / "docker" / "docker-compose.yml").write_text("services: {}\n")
+    (tmp_path / "docker" / "docker-compose.ubuntu.yml").write_text("services: {}\n")
+    (tmp_path / ".env").write_text("APP_VERSION=1.2.3\n")
+    (tmp_path / ".env.deploy").write_text(
+        "\n".join(
+            [
+                "UBUNTU_BUILD_PUSH=false",
+                "PUBLIC_DOMAIN=protected-container.zenia.eu",
+                "STAGING_PUBLIC_DOMAIN=staging-protected-container.zenia.eu",
+                "STAGING_REMOTE_DIR=/srv/staging",
+                "STAGING_PORTAINER_STACK_NAME=staging-protected-container",
+                "APP_IMAGE=example/app:latest",
+                "PORTAINER_STACK_NAME=protected-container",
+                "PORTAINER_ENDPOINT_ID=1",
+            ]
+        )
+        + "\n"
+    )
+    (tmp_path / ".env.deploy.secrets").write_text("PORTAINER_ACCESS_TOKEN=token-123\n")
+
+    for key in [
+        "UBUNTU_SSH_HOST",
+        "UBUNTU_NO_SSH",
+        "PORTAINER_API_HOST",
+        "UBUNTU_BUILD_PUSH",
+        "PUBLIC_DOMAIN",
+        "STAGING_PUBLIC_DOMAIN",
+        "STAGING_REMOTE_DIR",
+        "STAGING_PORTAINER_STACK_NAME",
+        "APP_IMAGE",
+        "PORTAINER_STACK_NAME",
+        "PORTAINER_ENDPOINT_ID",
+        "PORTAINER_ACCESS_TOKEN",
+        "UBUNTU_COMPOSE_FILES",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+
+    class DummyHooks:
+        def call(self, hook_name, *args, **kwargs):
+            if hook_name == "configure_deploy_log":
+                args[2].versioning_enabled = False
+            return None
+
+    subprocess_calls: list[list[str]] = []
+    def fake_run(cmd, *args, **kwargs):
+        subprocess_calls.append(cmd)
+        class DummyResult:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return DummyResult()
+
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_hooks.load_hooks", lambda **kwargs: DummyHooks())
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.subprocess.run", fake_run)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy._run", lambda *args, **kwargs: None)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.render_compose_stack_content", lambda **kwargs: "services:\n  app:\n    image: example/app:latest\n")
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.is_portainer_access_token_valid", lambda **kwargs: True)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.set_portainer_stack_containers_state", lambda **kwargs: ["app"])
+    
+    webhook_api_calls = []
+    def fake_resolve_portainer_webhook_url_via_api(**kwargs):
+        webhook_api_calls.append(kwargs)
+        return ""
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.resolve_portainer_webhook_url_via_api", fake_resolve_portainer_webhook_url_via_api)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log.append_deploy_record_with_settings", lambda **kwargs: tmp_path / "version_log.csv")
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log._read_app_version", lambda repo_root: "1.2.3")
+
+    main(["--no-ssh", "--portainer-api-host", "portainer.zenia.eu", "--skip-build-push"], repo_root_override=tmp_path)
+
+    # Verify no ssh/rsync commands were executed
+    for call in subprocess_calls:
+        assert "ssh" not in call
+        assert "rsync" not in call
+
+    # Verify the portainer API call was made and ssh_run_fn was passed as None
+    assert len(webhook_api_calls) == 1
+    assert webhook_api_calls[0]["host"] == "portainer.zenia.eu"
+    assert webhook_api_calls[0]["ssh_run_fn"] is None
+
+
+def test_main_auto_enables_no_ssh_when_ssh_host_is_empty(tmp_path, monkeypatch):
+    (tmp_path / "docker").mkdir()
+    (tmp_path / "docker" / "docker-compose.yml").write_text("services: {}\n")
+    (tmp_path / "docker" / "docker-compose.ubuntu.yml").write_text("services: {}\n")
+    (tmp_path / ".env").write_text("APP_VERSION=1.2.3\n")
+    (tmp_path / ".env.deploy").write_text(
+        "\n".join(
+            [
+                "UBUNTU_BUILD_PUSH=false",
+                "PUBLIC_DOMAIN=protected-container.zenia.eu",
+                "STAGING_PUBLIC_DOMAIN=staging-protected-container.zenia.eu",
+                "STAGING_PORTAINER_STACK_NAME=staging-protected-container",
+                "APP_IMAGE=example/app:latest",
+                "PORTAINER_STACK_NAME=protected-container",
+                "PORTAINER_ENDPOINT_ID=1",
+            ]
+        )
+        + "\n"
+    )
+    (tmp_path / ".env.deploy.secrets").write_text("PORTAINER_ACCESS_TOKEN=token-123\n")
+
+    for key in [
+        "UBUNTU_SSH_HOST",
+        "UBUNTU_NO_SSH",
+        "PORTAINER_API_HOST",
+        "UBUNTU_BUILD_PUSH",
+        "PUBLIC_DOMAIN",
+        "STAGING_PUBLIC_DOMAIN",
+        "STAGING_PORTAINER_STACK_NAME",
+        "APP_IMAGE",
+        "PORTAINER_STACK_NAME",
+        "PORTAINER_ENDPOINT_ID",
+        "PORTAINER_ACCESS_TOKEN",
+        "UBUNTU_COMPOSE_FILES",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+
+    class DummyHooks:
+        def call(self, hook_name, *args, **kwargs):
+            if hook_name == "configure_deploy_log":
+                args[2].versioning_enabled = False
+            return None
+
+    subprocess_calls: list[list[str]] = []
+    def fake_run(cmd, *args, **kwargs):
+        subprocess_calls.append(cmd)
+        class DummyResult:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return DummyResult()
+
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_hooks.load_hooks", lambda **kwargs: DummyHooks())
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.subprocess.run", fake_run)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy._run", lambda *args, **kwargs: None)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.render_compose_stack_content", lambda **kwargs: "services:\n  app:\n    image: example/app:latest\n")
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.is_portainer_access_token_valid", lambda **kwargs: True)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.set_portainer_stack_containers_state", lambda **kwargs: ["app"])
+    
+    webhook_api_calls = []
+    def fake_resolve_portainer_webhook_url_via_api(**kwargs):
+        webhook_api_calls.append(kwargs)
+        return ""
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.resolve_portainer_webhook_url_via_api", fake_resolve_portainer_webhook_url_via_api)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log.append_deploy_record_with_settings", lambda **kwargs: tmp_path / "version_log.csv")
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log._read_app_version", lambda repo_root: "1.2.3")
+
+    # Run without `--no-ssh` or SSH host, should auto-enable no_ssh
+    main(["--skip-build-push"], repo_root_override=tmp_path)
+
+    # Verify no ssh/rsync commands were executed
+    for call in subprocess_calls:
+        assert "ssh" not in call
+        assert "rsync" not in call
+
+    # Verify the portainer API call was made and ssh_run_fn was passed as None
+    assert len(webhook_api_calls) == 1
+    assert webhook_api_calls[0]["host"] == "portainer.zenia.eu"
+    assert webhook_api_calls[0]["ssh_run_fn"] is None
+
+
+
+def test_resolve_portainer_webhook_url_via_api_cleans_containers_without_ssh(monkeypatch):
+    deleted_urls: list[str] = []
+
+    class DummyResponse:
+        status_code = 200
+        ok = True
+        text = ""
+
+        def json(self):
+            return []
+
+        def raise_for_status(self):
+            pass
+
+    def fake_get(url, headers, **kwargs):
+        if "/api/stacks" in url:
+            return DummyResponse()
+        if "/api/endpoints" in url:
+            class EndpointResponse:
+                status_code = 200
+                def json(self):
+                    return [{"Id": 1, "Name": "local", "URL": "unix://"}]
+                def raise_for_status(self):
+                    pass
+            return EndpointResponse()
+        return DummyResponse()
+
+    def fake_delete(url, headers, **kwargs):
+        deleted_urls.append(url)
+        return DummyResponse()
+
+    def fake_post(url, headers, json, **kwargs):
+        class CreateResponse:
+            status_code = 200
+            ok = True
+            text = ""
+            def json(self):
+                return {"Webhook": "token-123"}
+        return CreateResponse()
+
+    monkeypatch.setattr("scripts.deploy.portainer_helpers.requests.get", fake_get)
+    monkeypatch.setattr("scripts.deploy.portainer_helpers.requests.delete", fake_delete)
+    monkeypatch.setattr("scripts.deploy.portainer_helpers.requests.post", fake_post)
+
+    from scripts.deploy.portainer_helpers import resolve_portainer_webhook_url_via_api
+
+    stack_file_content = """
+services:
+  app:
+    container_name: test-app
+  worker:
+    container_name: test-worker
+"""
+
+    resolve_portainer_webhook_url_via_api(
+        host="portainer.example.com",
+        https_port=443,
+        insecure=True,
+        stack_name="my-stack",
+        endpoint_id="1",
+        access_token="token-123",
+        stack_file_content=stack_file_content,
+        ssh_run_fn=None,
+    )
+
+    # Verify that requests.delete was called for the two container names
+    assert any("containers/test-app" in url for url in deleted_urls)
+    assert any("containers/test-worker" in url for url in deleted_urls)

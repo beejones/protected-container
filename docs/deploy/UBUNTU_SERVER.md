@@ -99,9 +99,13 @@ Now that the infrastructure is ready, deploy the `protected-container`.
 
 ### Automatic Deployment (Recommended)
 
-Use the built-in deploy script that uses SSH to copy files and triggers a Portainer webhook. 
+By default, the deployment script runs in **SSH-free mode** (`UBUNTU_NO_SSH=true`). This interacts with Portainer strictly over the HTTP/HTTPS API to create or update the stack and does not require SSH credentials, connectivity, or `rsync` sync transfers.
 
-Ensure you have created a Stack in Portainer named `protected-container` and enabled its Webhook.
+To use SSH-free mode, ensure you have configured:
+- `PORTAINER_ACCESS_TOKEN`: The Portainer API token in `.env.deploy.secrets`.
+- `PORTAINER_API_HOST`: (Optional) The Portainer API host name, otherwise derived automatically from `PUBLIC_DOMAIN`.
+
+If you need the script to manage the remote server lifecycle over SSH (e.g. creating/checking remote directories, syncing `.env` files, ensuring Portainer itself is running, pre-pulling GHCR images, or automatically refreshing the central Caddy proxy), you can enable the SSH mode by setting `UBUNTU_NO_SSH=false` in `.env.deploy`.
 
 **Configure `.env.deploy.secrets` locally:**
 ```env
@@ -112,12 +116,10 @@ PORTAINER_ACCESS_TOKEN=<your-portainer-api-token>
 **Deploy:**
 ```bash
 source .venv/bin/activate
-python scripts/deploy/ubuntu_deploy.py \
-  --remote-dir /opt/protected-container \
-  --sync-secrets
+python scripts/deploy/ubuntu_deploy.py
 ```
 
-This pushes the image, syncs `docker-compose.yml` and `.env` files, refreshes the central Caddy proxy, ensures Portainer is running on `portainer/portainer-ce:latest` on the external `caddy` network, and triggers Portainer to pull and restart the stack. If an existing `portainer` container was created from an older image, without the `caddy` network, or with host port bindings, the deploy script recreates it with the same `portainer_data` volume before using the Portainer API or webhook.
+This builds/pushes the image, then deploys the stack through the Portainer API using the repository-owned docker-compose files as the single source of truth. If SSH mode is enabled (`UBUNTU_NO_SSH=false`), it will also check SSH connectivity, sync compose and environment files via `rsync`, ensure Portainer and Caddy are running on the host, and execute pre-pull commands.
 
 ## Troubleshooting Caddy
 

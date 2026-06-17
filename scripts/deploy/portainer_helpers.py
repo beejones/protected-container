@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shlex
 import time
-from typing import Literal
+from typing import Callable, Literal
 
 import requests
 
@@ -222,7 +222,7 @@ def resolve_portainer_webhook_url_via_api(
     endpoint_id: str,
     access_token: str,
     stack_file_content: str,
-    ssh_run_fn,
+    ssh_run_fn: Callable[[str], None] | None = None,
 ) -> str:
     hostname = extract_ssh_hostname(host).strip()
     base_url = f"https://{hostname}:{https_port}"
@@ -295,8 +295,16 @@ def resolve_portainer_webhook_url_via_api(
             raise SystemExit(f"Failed to remove existing Portainer stack '{desired_name}': {delete_resp.status_code} {details}")
 
     cleanup_names = _extract_container_names(stack_file_content)
-    for container_name in cleanup_names:
-        ssh_run_fn(f"docker rm -f {shlex.quote(container_name)} >/dev/null 2>&1 || true")
+    if ssh_run_fn:
+        for container_name in cleanup_names:
+            ssh_run_fn(f"docker rm -f {shlex.quote(container_name)} >/dev/null 2>&1 || true")
+    else:
+        for container_name in cleanup_names:
+            del_url = f"{base_url}/api/endpoints/{desired_endpoint}/docker/containers/{container_name}?force=true"
+            try:
+                requests.delete(del_url, headers=headers, verify=not insecure, timeout=20)
+            except Exception:
+                pass
 
     create_url = f"{base_url}/api/stacks/create/standalone/string?endpointId={desired_endpoint}"
     create_payload = {
