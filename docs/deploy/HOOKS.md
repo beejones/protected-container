@@ -64,6 +64,14 @@ For web-facing upstream containers, hook customizations must preserve the shared
 - Keep the public route behind the central Caddy `basic_auth` block unless the deploy docs explicitly define a different edge-auth policy.
 - Do not publish public host ports for normal web traffic; expose only the internal container port that Caddy will reverse proxy to.
 
+### Upstream Hooks under SSH-free Mode
+
+By default, the deployment script runs in **SSH-free mode** (`UBUNTU_NO_SSH=true`), relying entirely on the Portainer API for stack creation, deletion, and swap operations. Upstream containers and hook developers must design their integrations with the following constraints in mind:
+
+- **No Local File Sync**: Since `rsync` file transfers are bypassed, local files (such as `.env`, `.env.secrets`, or dynamic configuration files) are not copied to the host directory. Upstream containers should consume credentials and configurations via the environment variables mapped in the stack's Compose file.
+- **Portainer API Proxy Usage**: Container lifecycle operations (such as stopping staging stacks or removing conflicting container names prior to a deploy) are routed through Portainer's Docker proxy endpoints (e.g. `DELETE /api/endpoints/{id}/docker/containers/...`). Ensure `PORTAINER_ACCESS_TOKEN` is configured to enable these operations.
+- **Bypassed Host Actions**: The central Caddy proxy refresh, remote directory creation (`mkdir`), and pre-pulling commands are skipped. Upstream hooks that attempt to execute shell commands on the host (e.g., via SSH or local proxy scripts) must check if SSH is active, or adapt their custom tasks to run inside the container orchestration boundary.
+
 ### Portainer Auth For Ubuntu Hooks
 
 Portainer uses its own API authentication behind the Caddy TLS route. This is separate from the Caddy Basic Auth guard used for application routes.
