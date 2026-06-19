@@ -81,6 +81,8 @@ class VarsEnum(str, Enum):
     STAGING_PUBLIC_DOMAIN = "STAGING_PUBLIC_DOMAIN"
     STAGING_REMOTE_DIR = "STAGING_REMOTE_DIR"
     STAGING_PORTAINER_STACK_NAME = "STAGING_PORTAINER_STACK_NAME"
+    UBUNTU_NO_SSH = "UBUNTU_NO_SSH"
+    PORTAINER_API_HOST = "PORTAINER_API_HOST"
 
     # Runtime
     BASIC_AUTH_USER = "BASIC_AUTH_USER"
@@ -384,6 +386,18 @@ DEPLOY_SCHEMA: tuple[EnvKeySpec, ...] = (
     ),
     EnvKeySpec(
         key=VarsEnum.STAGING_PORTAINER_STACK_NAME,
+        mandatory=False,
+        default=None,
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.UBUNTU_NO_SSH,
+        mandatory=False,
+        default="true",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.PORTAINER_API_HOST,
         mandatory=False,
         default=None,
         targets=frozenset({EnvTarget.DOTENV_DEPLOY}),

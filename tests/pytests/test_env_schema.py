@@ -102,3 +102,11 @@ def test_cross_field_rules_require_ghcr_creds(tmp_path: Path) -> None:
         SecretsEnum.GHCR_TOKEN.value: "tok",
     }
     validate_cross_field_rules(deploy_kv=kv2, context="deploy")
+
+
+def test_ssh_free_keys_in_deploy_schema() -> None:
+    assert VarsEnum.UBUNTU_NO_SSH.value in [spec.key.value for spec in DEPLOY_SCHEMA]
+    assert VarsEnum.PORTAINER_API_HOST.value in [spec.key.value for spec in DEPLOY_SCHEMA]
+
+    kv = apply_defaults(DEPLOY_SCHEMA, {})
+    assert kv[VarsEnum.UBUNTU_NO_SSH.value] == "true"
