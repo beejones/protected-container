@@ -223,6 +223,7 @@ def resolve_portainer_webhook_url_via_api(
     access_token: str,
     stack_file_content: str,
     ssh_run_fn: Callable[[str], None] | None = None,
+    timeout: int = 300,
 ) -> str:
     hostname = extract_ssh_hostname(host).strip()
     base_url = f"https://{hostname}:{https_port}"
@@ -318,7 +319,7 @@ def resolve_portainer_webhook_url_via_api(
         headers=headers,
         json=create_payload,
         verify=not insecure,
-        timeout=30,
+        timeout=timeout,
     )
 
     if not create_resp.ok:

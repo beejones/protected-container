@@ -1508,3 +1508,185 @@ services:
     # Verify that requests.delete was called for the two container names
     assert any("containers/test-app" in url for url in deleted_urls)
     assert any("containers/test-worker" in url for url in deleted_urls)
+
+
+def test_resolve_portainer_webhook_url_via_api_uses_custom_timeout(monkeypatch):
+    post_calls = []
+
+    class DummyResponse:
+        status_code = 200
+        ok = True
+        text = ""
+
+        def json(self):
+            return []
+
+        def raise_for_status(self):
+            pass
+
+    def fake_get(url, headers, **kwargs):
+        if "/api/endpoints" in url:
+            class EndpointResponse:
+                status_code = 200
+                def json(self):
+                    return [{"Id": 1, "Name": "local", "URL": "unix://"}]
+                def raise_for_status(self):
+                    pass
+            return EndpointResponse()
+        return DummyResponse()
+
+    def fake_post(url, headers, json, timeout, **kwargs):
+        post_calls.append(timeout)
+        class CreateResponse:
+            status_code = 200
+            ok = True
+            text = ""
+            def json(self):
+                return {"Webhook": "token-123"}
+        return CreateResponse()
+
+    monkeypatch.setattr("scripts.deploy.portainer_helpers.requests.get", fake_get)
+    monkeypatch.setattr("scripts.deploy.portainer_helpers.requests.post", fake_post)
+
+    from scripts.deploy.portainer_helpers import resolve_portainer_webhook_url_via_api
+
+    # Verify custom timeout
+    resolve_portainer_webhook_url_via_api(
+        host="portainer.example.com",
+        https_port=443,
+        insecure=True,
+        stack_name="my-stack",
+        endpoint_id="1",
+        access_token="token-123",
+        stack_file_content="services:\n  app:\n    image: dummy\n",
+        ssh_run_fn=None,
+        timeout=123,
+    )
+    assert post_calls == [123]
+
+    # Verify default timeout
+    resolve_portainer_webhook_url_via_api(
+        host="portainer.example.com",
+        https_port=443,
+        insecure=True,
+        stack_name="my-stack",
+        endpoint_id="1",
+        access_token="token-123",
+        stack_file_content="services:\n  app:\n    image: dummy\n",
+        ssh_run_fn=None,
+    )
+    assert post_calls == [123, 300]
+
+
+def test_main_resolves_portainer_create_stack_timeout(tmp_path, monkeypatch):
+    (tmp_path / "docker").mkdir()
+    (tmp_path / "docker" / "docker-compose.yml").write_text("services: {}\n")
+    (tmp_path / "docker" / "docker-compose.ubuntu.yml").write_text("services: {}\n")
+    (tmp_path / ".env").write_text("APP_VERSION=1.2.3\n")
+    
+    base_env_content = [
+        "UBUNTU_BUILD_PUSH=false",
+        "PUBLIC_DOMAIN=protected-container.zenia.eu",
+        "STAGING_REMOTE_DIR=/srv/staging",
+        "STAGING_PORTAINER_STACK_NAME=staging-protected-container",
+        "APP_IMAGE=example/app:latest",
+        "PORTAINER_STACK_NAME=protected-container",
+        "PORTAINER_ENDPOINT_ID=1",
+    ]
+    
+    (tmp_path / ".env.deploy").write_text("\n".join(base_env_content) + "\n")
+    (tmp_path / ".env.deploy.secrets").write_text("PORTAINER_ACCESS_TOKEN=token-123\n")
+
+    for key in [
+        "UBUNTU_SSH_HOST",
+        "UBUNTU_NO_SSH",
+        "PORTAINER_API_HOST",
+        "UBUNTU_BUILD_PUSH",
+        "PUBLIC_DOMAIN",
+        "APP_IMAGE",
+        "PORTAINER_STACK_NAME",
+        "PORTAINER_ENDPOINT_ID",
+        "PORTAINER_ACCESS_TOKEN",
+        "PORTAINER_CREATE_STACK_TIMEOUT",
+        "STAGING_REMOTE_DIR",
+        "STAGING_PORTAINER_STACK_NAME",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+
+    class DummyHooks:
+        def call(self, hook_name, *args, **kwargs):
+            if hook_name == "configure_deploy_log":
+                args[2].versioning_enabled = False
+            return None
+
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_hooks.load_hooks", lambda **kwargs: DummyHooks())
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.subprocess.run", lambda *args, **kwargs: None)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy._run", lambda *args, **kwargs: None)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.render_compose_stack_content", lambda **kwargs: "services:\n  app:\n    image: example/app:latest\n")
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.is_portainer_access_token_valid", lambda **kwargs: True)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.set_portainer_stack_containers_state", lambda **kwargs: ["app"])
+    
+    webhook_api_calls = []
+    def fake_resolve_portainer_webhook_url_via_api(**kwargs):
+        webhook_api_calls.append(kwargs)
+        return ""
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.portainer_helpers.resolve_portainer_webhook_url_via_api", fake_resolve_portainer_webhook_url_via_api)
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log.append_deploy_record_with_settings", lambda **kwargs: tmp_path / "version_log.csv")
+    monkeypatch.setattr("scripts.deploy.ubuntu_deploy.deploy_log._read_app_version", lambda repo_root: "1.2.3")
+
+    from scripts.deploy.ubuntu_deploy import main
+
+    # 1. Test CLI arg overrides everything
+    main(
+        [
+            "--no-ssh",
+            "--portainer-api-host", "portainer.zenia.eu",
+            "--skip-build-push",
+            "--portainer-create-stack-timeout", "456",
+        ],
+        repo_root_override=tmp_path,
+    )
+    assert len(webhook_api_calls) == 1
+    assert webhook_api_calls[-1]["timeout"] == 456
+
+    # 2. Test Env variable works
+    monkeypatch.setenv("PORTAINER_CREATE_STACK_TIMEOUT", "789")
+    main(
+        [
+            "--no-ssh",
+            "--portainer-api-host", "portainer.zenia.eu",
+            "--skip-build-push",
+        ],
+        repo_root_override=tmp_path,
+    )
+    assert len(webhook_api_calls) == 2
+    assert webhook_api_calls[-1]["timeout"] == 789
+
+    # 3. Test .env.deploy key works
+    monkeypatch.delenv("PORTAINER_CREATE_STACK_TIMEOUT")
+    (tmp_path / ".env.deploy").write_text(
+        (tmp_path / ".env.deploy").read_text() + "\nPORTAINER_CREATE_STACK_TIMEOUT=150\n"
+    )
+    main(
+        [
+            "--no-ssh",
+            "--portainer-api-host", "portainer.zenia.eu",
+            "--skip-build-push",
+        ],
+        repo_root_override=tmp_path,
+    )
+    assert len(webhook_api_calls) == 3
+    assert webhook_api_calls[-1]["timeout"] == 150
+
+    # 4. Test default is 300
+    (tmp_path / ".env.deploy").write_text("\n".join(base_env_content) + "\n")  # clear timeout
+    main(
+        [
+            "--no-ssh",
+            "--portainer-api-host", "portainer.zenia.eu",
+            "--skip-build-push",
+        ],
+        repo_root_override=tmp_path,
+    )
+    assert len(webhook_api_calls) == 4
+    assert webhook_api_calls[-1]["timeout"] == 300

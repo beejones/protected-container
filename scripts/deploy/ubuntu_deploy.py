@@ -64,6 +64,7 @@ ENV_STAGING_REMOTE_DIR = "STAGING_REMOTE_DIR"
 ENV_STAGING_PORTAINER_STACK_NAME = "STAGING_PORTAINER_STACK_NAME"
 ENV_UBUNTU_NO_SSH = "UBUNTU_NO_SSH"
 ENV_PORTAINER_API_HOST = "PORTAINER_API_HOST"
+ENV_PORTAINER_CREATE_STACK_TIMEOUT = "PORTAINER_CREATE_STACK_TIMEOUT"
 
 UNSUPPORTED_EDGE_AUTH_DEPLOY_KEYS: frozenset[str] = frozenset(
     {
@@ -778,6 +779,12 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
         help="Pass -k to curl when triggering Portainer webhook",
     )
     parser.add_argument(
+        "--portainer-create-stack-timeout",
+        type=int,
+        default=None,
+        help="Timeout in seconds for Portainer stack creation API call (default: 300)",
+    )
+    parser.add_argument(
         "--skip-build-push",
         action="store_true",
         help="Skip default local docker build+push before deployment",
@@ -1000,6 +1007,18 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
     resolved_portainer_endpoint_id = str(os.getenv(ENV_PORTAINER_ENDPOINT_ID) or "").strip()
     if not resolved_portainer_endpoint_id:
         resolved_portainer_endpoint_id = read_deploy_key(repo_root=repo_root, key=ENV_PORTAINER_ENDPOINT_ID)
+
+    resolved_portainer_create_stack_timeout = args.portainer_create_stack_timeout
+    if resolved_portainer_create_stack_timeout is None:
+        timeout_env = str(os.getenv(ENV_PORTAINER_CREATE_STACK_TIMEOUT) or "").strip()
+        if not timeout_env:
+            timeout_env = read_deploy_secret_key(repo_root=repo_root, key=ENV_PORTAINER_CREATE_STACK_TIMEOUT)
+        if not timeout_env:
+            timeout_env = read_deploy_key(repo_root=repo_root, key=ENV_PORTAINER_CREATE_STACK_TIMEOUT)
+        try:
+            resolved_portainer_create_stack_timeout = int(timeout_env) if timeout_env else 300
+        except ValueError:
+            resolved_portainer_create_stack_timeout = 300
 
     resolved_storage_manager_api_url = str(args.storage_manager_api_url or "").strip()
     if not resolved_storage_manager_api_url:
@@ -1343,6 +1362,7 @@ def main(argv: list[str] | None = None, repo_root_override: Path | None = None) 
                 access_token=resolved_portainer_access_token,
                 stack_file_content=stack_file_content,
                 ssh_run_fn=None if no_ssh_enabled else (lambda remote_command: _run(build_ssh_cmd(host=resolved_host, remote_command=remote_command))),
+                timeout=resolved_portainer_create_stack_timeout,
             )
         except requests.HTTPError as exc:
             status_code = int(getattr(getattr(exc, "response", None), "status_code", 0) or 0)
