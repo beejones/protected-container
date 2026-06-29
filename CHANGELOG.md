@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.21] - 2026-06-29
+
+### Git
+
+- Last git ref: [`9da1414`](https://github.com/beejones/protected-container/commit/9da141432615f53039364f59e6dabeb4d7e0d77e)
+
+### New Capabilities
+
+- Added exclusion of `/api/*` and `/socket.io/*` paths from Caddy's Basic Authentication to prevent credential prompts for API and WebSocket requests.
+- Added configurable `WEB_PORT` environment variable (defaulting to `3000`) for custom upstream container web ports.
+- Added support for WebSockets in reverse proxy configuration via Upgrade and Connection headers.
+- Added configurable timeout support (`PORTAINER_CREATE_STACK_TIMEOUT` with default of 300 seconds) for Portainer stack creation, accessible via CLI argument, env variable, and configuration files.
+
+### Fixed Bugs
+
+- Fixed Portainer container filtering to prevent matching empty or whitespace-only stack names.
+- Corrected the `WEB_PORT` default value in deployment schema to match test expectations.
+- Improved environment variable parsing and loading in Ubuntu proxy deploy scripts to export specific deployment variables safely via Python.
+
+### Touched Models
+
+- Caddy reverse proxy and basic auth configuration templates.
+- Deployment environment schemas (`VarsEnum`, `DEPLOY_SCHEMA`) and defaults.
+- Portainer helper functions (`_container_belongs_to_stack`, `resolve_portainer_webhook_url_via_api`).
+
 ## [0.2.14] - 2026-06-12
 
 ### Git
