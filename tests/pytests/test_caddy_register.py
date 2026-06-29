@@ -42,7 +42,7 @@ def test_site_block_template_includes_basic_auth_placeholders() -> None:
         port="8080",
     )
 
-    assert "basic_auth /* {" in block
+    assert "basic_auth @auth {" in block
     assert "{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}" in block
 
 
@@ -163,7 +163,7 @@ def test_ensure_caddy_registration_appends_and_restarts(monkeypatch) -> None:
 
     assert out is True
     assert "example.com {" in state["caddyfile"]
-    assert "basic_auth /* {" in state["caddyfile"]
+    assert "basic_auth @auth {" in state["caddyfile"]
     assert "{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}" in state["caddyfile"]
     assert "reverse_proxy my-service:8080" in state["caddyfile"]
     assert append_calls == ["tee -a /opt/proxy/Caddyfile > /dev/null"]
@@ -214,7 +214,7 @@ example.com {
 
     assert out is True
     assert state["caddyfile"].count("example.com {") == 1
-    assert "basic_auth /* {" in state["caddyfile"]
+    assert "basic_auth @auth {" in state["caddyfile"]
     assert "{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}" in state["caddyfile"]
     assert "reverse_proxy my-service:8080" in state["caddyfile"]
 
@@ -331,7 +331,7 @@ def test_ensure_caddy_registration_repairs_public_domain_placeholder_with_stale_
 
     assert out is True
     assert "{$PUBLIC_DOMAIN} {" in state["caddyfile"]
-    assert "basic_auth /* {" in state["caddyfile"]
+    assert "basic_auth @auth {" in state["caddyfile"]
     assert "reverse_proxy stock-dashboard:3000" in state["caddyfile"]
     assert "reverse_proxy protected-container:8080" not in state["caddyfile"]
 

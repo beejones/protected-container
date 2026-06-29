@@ -37,11 +37,17 @@ SITE_BLOCK_TEMPLATE = """\
     encode gzip
     header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 
-    basic_auth /* {{
+    @auth {{
+        not path /api/* /socket.io/* */api/* */api
+    }}
+    basic_auth @auth {{
         {{$BASIC_AUTH_USER}} {{$BASIC_AUTH_HASH}}
     }}
 
-    reverse_proxy {service}:{port}
+    reverse_proxy {service}:{port} {{
+        header_up Upgrade {{http.request.header.Upgrade}}
+        header_up Connection {{http.request.header.Connection}}
+    }}
 }}
 """
 
