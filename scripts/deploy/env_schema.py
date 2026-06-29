@@ -375,7 +375,7 @@ DEPLOY_SCHEMA: tuple[EnvKeySpec, ...] = (
     EnvKeySpec(
         key=VarsEnum.WEB_PORT,
         mandatory=False,
-        default="8080",
+        default="3000",
         targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
     ),
     # Staging (optional)
