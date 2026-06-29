@@ -87,6 +87,7 @@ class VarsEnum(str, Enum):
     # Runtime
     BASIC_AUTH_USER = "BASIC_AUTH_USER"
     APP_VERSION = "APP_VERSION"
+    WEB_PORT = "WEB_PORT"
 
     # Storage-manager sidecar (consumed by docker/storage-manager compose via
     # ${SM_*:-default}; shipped in env.example, so the runtime schema must know them)
@@ -370,6 +371,12 @@ DEPLOY_SCHEMA: tuple[EnvKeySpec, ...] = (
         key=SecretsEnum.BASIC_AUTH_HASH,
         mandatory=False,
         targets=frozenset({EnvTarget.GH_ACTIONS_SECRET}),
+    ),
+    EnvKeySpec(
+        key=VarsEnum.WEB_PORT,
+        mandatory=False,
+        default="8080",
+        targets=frozenset({EnvTarget.DOTENV_DEPLOY, EnvTarget.GH_ACTIONS_VAR}),
     ),
     # Staging (optional)
     EnvKeySpec(

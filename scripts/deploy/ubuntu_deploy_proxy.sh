@@ -6,12 +6,19 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
 echo "[proxy-deploy] 🔍 Loading environment variables..."
-set -a
-[ -f .env ] && source .env || true
-[ -f .env.secrets ] && source .env.secrets || true
-[ -f .env.deploy ] && source .env.deploy || true
-[ -f .env.deploy.secrets ] && source .env.deploy.secrets || true
-set +a
+eval "$("${PYTHON_BIN:-python3}" -c '
+import shlex
+from pathlib import Path
+from dotenv import dotenv_values
+combined = {}
+for name in [".env", ".env.secrets", ".env.deploy", ".env.deploy.secrets"]:
+    p = Path(name)
+    if p.exists():
+        combined.update(dotenv_values(p))
+for k in ["UBUNTU_SSH_HOST", "ACME_EMAIL", "PUBLIC_DOMAIN", "BASIC_AUTH_USER", "BASIC_AUTH_HASH", "UBUNTU_REMOTE_DIR", "UBUNTU_PROXY_DIR"]:
+    if k in combined and combined[k] is not None:
+        print(f"export {k}={shlex.quote(combined[k])}")
+')"
 
 if [ -z "${UBUNTU_SSH_HOST:-}" ]; then
   echo "[proxy-deploy] ❌ Error: UBUNTU_SSH_HOST is not set in .env.deploy"
