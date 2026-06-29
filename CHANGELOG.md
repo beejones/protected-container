@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Git
 
-- Last git ref: [`9da1414`](https://github.com/beejones/protected-container/commit/9da141432615f53039364f59e6dabeb4d7e0d77e)
+- Last git ref: [`5f13160`](https://github.com/beejones/protected-container/commit/5f13160b81df9bd207f2a15998a449fa5ebc28be)
 
 ### New Capabilities
 
