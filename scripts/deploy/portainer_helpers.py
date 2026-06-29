@@ -97,14 +97,19 @@ def resolve_portainer_endpoint_id(
 def _container_belongs_to_stack(container_payload: object, stack_name: str) -> bool:
     if not isinstance(container_payload, dict):
         return False
+    stack_name = str(stack_name or "").strip()
+    if not stack_name:
+        return False
     labels = container_payload.get("Labels") or container_payload.get("labels") or {}
     if not isinstance(labels, dict):
         labels = {}
 
     label_values = {
-        str(labels.get("com.docker.compose.project") or "").strip(),
-        str(labels.get("com.docker.stack.namespace") or "").strip(),
-        str(labels.get("io.portainer.stack.name") or "").strip(),
+        val for val in (
+            str(labels.get("com.docker.compose.project") or "").strip(),
+            str(labels.get("com.docker.stack.namespace") or "").strip(),
+            str(labels.get("io.portainer.stack.name") or "").strip(),
+        ) if val
     }
     if stack_name in label_values:
         return True
@@ -115,6 +120,7 @@ def _container_belongs_to_stack(container_payload: object, stack_name: str) -> b
         return any(name == stack_name or name.startswith(f"{stack_name}-") or name.startswith(f"{stack_name}_") for name in normalized_names)
 
     return False
+
 
 
 def list_portainer_stack_containers(

@@ -903,6 +903,56 @@ def test_list_portainer_stack_containers_filters_by_compose_project_label(monkey
     assert calls == ["https://192.168.1.45:9943/api/endpoints/1/docker/containers/json"]
 
 
+def test_list_portainer_stack_containers_with_empty_stack_name_returns_nothing(monkeypatch):
+    class DummyResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [
+                {
+                    "Id": "abc123",
+                    "Names": ["/staging-protected-container"],
+                    "Labels": {},  # missing labels, so gets "" as compose project/stack name
+                },
+                {
+                    "Id": "def456",
+                    "Names": ["/protected-container"],
+                    "Labels": {"com.docker.compose.project": "protected-container"},
+                },
+            ]
+
+    def fake_get(url, headers, **kwargs):
+        return DummyResponse()
+
+    monkeypatch.setattr("scripts.deploy.portainer_helpers.requests.get", fake_get)
+
+    # Empty stack name
+    containers = list_portainer_stack_containers(
+        host="192.168.1.45",
+        https_port=9943,
+        insecure=True,
+        endpoint_id="1",
+        access_token="token-123",
+        stack_name="",
+    )
+    assert not containers
+
+    # Whitespace stack name
+    containers_ws = list_portainer_stack_containers(
+        host="192.168.1.45",
+        https_port=9943,
+        insecure=True,
+        endpoint_id="1",
+        access_token="token-123",
+        stack_name="  ",
+    )
+    assert not containers_ws
+
+
+
 def test_set_portainer_stack_containers_state_posts_start_to_each_container(monkeypatch):
     class ListResponse:
         status_code = 200
