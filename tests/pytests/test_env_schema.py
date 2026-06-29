@@ -115,4 +115,4 @@ def test_ssh_free_keys_in_deploy_schema() -> None:
 def test_web_port_key_in_deploy_schema() -> None:
     assert VarsEnum.WEB_PORT.value in [spec.key.value for spec in DEPLOY_SCHEMA]
     kv = apply_defaults(DEPLOY_SCHEMA, {})
-    assert kv[VarsEnum.WEB_PORT.value] == "3000"
+    assert kv[VarsEnum.WEB_PORT.value] == "8080"
